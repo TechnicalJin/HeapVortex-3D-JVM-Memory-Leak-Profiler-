@@ -57,4 +57,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     private static ResponseEntity<Map<String, String>> error(HttpStatus status, String message) {
         return ResponseEntity.status(status).body(Map.of("error", message));
     }
+
+    @ExceptionHandler(ObjectNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleObjectNotFound(ObjectNotFoundException ex) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(HeapTooLargeException.class)
+    public ResponseEntity<Map<String, String>> handleHeapTooLarge(HeapTooLargeException ex) {
+        return ResponseEntity.status(413).body(Map.of("error", ex.getMessage()));
+    }
 }
