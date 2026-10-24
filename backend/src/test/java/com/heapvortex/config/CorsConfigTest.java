@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -32,8 +33,9 @@ class CorsConfigTest {
     }
 
     @Test
-    void onlyReadMethodsAreAllowed() {
-        assertTrue(apiConfiguration().getAllowedMethods().contains("GET"));
-        assertFalse(apiConfiguration().getAllowedMethods().contains("DELETE"));
+    void onlyTheNeededMethodsAreAllowed() {
+        List<String> methods = apiConfiguration().getAllowedMethods();
+        assertTrue(methods.containsAll(List.of("GET", "POST", "DELETE")));
+        assertFalse(methods.contains("PUT"));
     }
 }
