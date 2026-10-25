@@ -143,4 +143,34 @@ class ObjectGraphBuilderTest {
         assertThrows(HeapTooLargeException.class,
                 () -> GraphTestSupport.load(SampleHeaps.holderAndChildren(), 3));
     }
+
+    @Test
+    void incomingEdgesMirrorTheOutgoingEdges() throws IOException {
+        ObjectGraph graph = graph();
+        int child1 = node(graph, CHILD_1);
+
+        List<Long> sources = new ArrayList<>();
+        List<String> labels = new ArrayList<>();
+        for (int edge = graph.incomingStart(child1); edge < graph.incomingEnd(child1); edge++) {
+            sources.add(graph.idAt(graph.incomingSource(edge)));
+            labels.add(graph.labelOf(graph.incomingLabelId(edge)));
+        }
+
+        assertEquals(2, sources.size());
+        assertTrue(sources.contains(HOLDER_CLASS));
+        assertTrue(sources.contains(OBJECT_ARRAY));
+        assertTrue(labels.contains("static INSTANCE"));
+        assertTrue(labels.contains(null)); // the array element has no field name
+    }
+
+    @Test
+    void everyEdgeIsCountedOnceInEachDirection() throws IOException {
+        ObjectGraph graph = graph();
+        int incoming = 0;
+        for (int node = 0; node < graph.size(); node++) {
+            incoming += graph.incomingEnd(node) - graph.incomingStart(node);
+        }
+
+        assertEquals(graph.edgeCount(), incoming);
+    }
 }

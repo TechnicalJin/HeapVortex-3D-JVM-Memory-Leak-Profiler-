@@ -1,17 +1,11 @@
 package com.heapvortex.heap;
 
-import com.heapvortex.dto.GraphStatsDto;
-import com.heapvortex.dto.ObjectDetailsDto;
-import com.heapvortex.dto.ObjectSummaryDto;
-import com.heapvortex.dto.ReferenceDto;
+import com.heapvortex.dto.*;
 import com.heapvortex.exception.ObjectNotFoundException;
 import com.heapvortex.service.HeapGraphService;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @Service
 public class HprofHeapGraphService implements HeapGraphService {
@@ -83,6 +77,88 @@ public class HprofHeapGraphService implements HeapGraphService {
                 graph.shallowBytesAt(node),
                 graph.edgeEnd(node) - graph.edgeStart(node),
                 references);
+    }
+
+    @Override
+    public GcRootPathDto pathToGcRoot(
+            String dumpId,
+            String objectId,
+            int maxDepth) {
+
+        LoadedHeap heap = loader.load(dumpId);
+        ObjectGraph graph = heap.graph();
+        int target = nodeOf(heap, objectId);
+
+        int[] parent = new int[graph.size()];
+        int[] parentLabel = new int[graph.size()];
+        int[] depth = new int[graph.size()];
+        Arrays.fill(parent, -2);
+        Arrays.fill(parentLabel, ObjectGraphBuilder.NO_LABEL);
+
+        Deque<Integer> queue = new ArrayDeque<>();
+        parent[target] = -1;
+        queue.add(target);
+
+        int foundRoot = -1;
+
+        while (!queue.isEmpty()) {
+            int current = queue.removeFirst();
+
+            if (graph.isRoot(current)) {
+                foundRoot = current;
+                break;
+            }
+            if (depth[current] >= maxDepth) {
+                continue;
+            }
+
+            for (int edge = graph.incomingStart(current);
+                 edge < graph.incomingEnd(current);
+                 edge++) {
+                int source = graph.incomingSource(edge);
+                if (parent[source] != -2) {
+                    continue;
+                }
+                parent[source] = current;
+                parentLabel[source] = graph.incomingLabelId(edge);
+                depth[source] = depth[current] + 1;
+                queue.addLast(source);
+            }
+        }
+
+        if (foundRoot < 0) {
+            return new GcRootPathDto(
+                    ObjectIds.format(graph.idAt(target)),
+                    false,
+                    null,
+                    Collections.emptyList());
+        }
+
+        List<GcRootPathDto.PathNode> path = new ArrayList<>();
+        int current = foundRoot;
+
+        path.add(new GcRootPathDto.PathNode(
+                ObjectIds.format(graph.idAt(current)),
+                heap.displayName(current),
+                null));
+
+        while (current != target) {
+            int next = parent[current];
+            String reference = graph.labelOf(parentLabel[current]);
+
+            path.add(new GcRootPathDto.PathNode(
+                    ObjectIds.format(graph.idAt(next)),
+                    heap.displayName(next),
+                    reference == null ? "[element]" : reference));
+
+            current = next;
+        }
+
+        return new GcRootPathDto(
+                ObjectIds.format(graph.idAt(target)),
+                true,
+                graph.rootKindOf(foundRoot).name(),
+                path);
     }
 
     static int nodeOf(LoadedHeap heap, String objectId) {

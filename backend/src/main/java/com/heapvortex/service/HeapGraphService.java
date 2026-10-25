@@ -1,5 +1,6 @@
 package com.heapvortex.service;
 
+import com.heapvortex.dto.GcRootPathDto;
 import com.heapvortex.dto.GraphStatsDto;
 import com.heapvortex.dto.ObjectDetailsDto;
 import com.heapvortex.dto.ObjectSummaryDto;
@@ -14,4 +15,6 @@ public interface HeapGraphService {
     List<ObjectSummaryDto> instancesOf(String dumpId, String className, int limit);
 
     ObjectDetailsDto object(String dumpId, String objectId, int maxReferences);
+
+    GcRootPathDto pathToGcRoot(String dumpId, String objectId, int maxDepth);
 }

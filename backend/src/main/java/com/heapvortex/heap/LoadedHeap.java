@@ -1,10 +1,11 @@
 package com.heapvortex.heap;
 
-/** A parsed heap dump: the class information and the object graph. */
+/** A parsed heap dump: the class information, the object graph and (on demand) the dominator tree. */
 public final class LoadedHeap {
 
     private final ClassIndex classes;
     private final ObjectGraph graph;
+    private DominatorTree dominators;
 
     public LoadedHeap(ClassIndex classes, ObjectGraph graph) {
         this.classes = classes;
@@ -17,6 +18,14 @@ public final class LoadedHeap {
 
     public ObjectGraph graph() {
         return graph;
+    }
+
+    /** Computed on the first call, then reused. */
+    public synchronized DominatorTree dominators() {
+        if (dominators == null) {
+            dominators = DominatorTree.compute(graph);
+        }
+        return dominators;
     }
 
     /** The type of an object. A class object is an instance of java.lang.Class. */

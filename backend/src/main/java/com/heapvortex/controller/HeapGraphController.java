@@ -1,5 +1,6 @@
 package com.heapvortex.controller;
 
+import com.heapvortex.dto.GcRootPathDto;
 import com.heapvortex.dto.GraphStatsDto;
 import com.heapvortex.dto.ObjectDetailsDto;
 import com.heapvortex.dto.ObjectSummaryDto;
@@ -50,5 +51,19 @@ public class HeapGraphController {
         if (value < 1 || value > MAX_LIMIT) {
             throw new InvalidRequestException(name + " must be between 1 and " + MAX_LIMIT);
         }
+    }
+
+    @GetMapping("/objects/{objectId}/path-to-gc-root")
+    public GcRootPathDto pathToGcRoot(
+            @PathVariable String id,
+            @PathVariable String objectId,
+            @RequestParam(defaultValue = "100") int maxDepth) {
+
+        if (maxDepth < 1 || maxDepth > 1000) {
+            throw new InvalidRequestException(
+                    "maxDepth must be between 1 and 1000");
+        }
+
+        return graphService.pathToGcRoot(id, objectId, maxDepth);
     }
 }

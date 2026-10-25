@@ -1,3 +1,4 @@
+
 package com.heapvortex.controller;
 
 import com.heapvortex.dto.ClassHistogramEntryDto;
@@ -31,12 +32,17 @@ public class HeapAnalysisController {
     }
 
     @GetMapping("/histogram")
-    public List<ClassHistogramEntryDto> histogram(@PathVariable String id,
-                                                  @RequestParam(defaultValue = "20") int limit,
-                                                  @RequestParam(defaultValue = "bytes") String sort) {
+    public List<ClassHistogramEntryDto> histogram(
+            @PathVariable String id,
+            @RequestParam(defaultValue = "20") int limit,
+            @RequestParam(defaultValue = "bytes") String sort) {
+
         if (limit < 1 || limit > MAX_LIMIT) {
-            throw new InvalidRequestException("limit must be between 1 and " + MAX_LIMIT);
+            throw new InvalidRequestException(
+                    "limit must be between 1 and " + MAX_LIMIT);
         }
-        return analysisService.histogram(id, limit, HistogramSort.from(sort));
+
+        return analysisService.histogram(
+                id, limit, HistogramSort.from(sort));
     }
 }

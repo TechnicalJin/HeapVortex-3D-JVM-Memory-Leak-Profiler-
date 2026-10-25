@@ -1,9 +1,6 @@
 package com.heapvortex.controller;
 
-import com.heapvortex.dto.GraphStatsDto;
-import com.heapvortex.dto.ObjectDetailsDto;
-import com.heapvortex.dto.ObjectSummaryDto;
-import com.heapvortex.dto.ReferenceDto;
+import com.heapvortex.dto.*;
 import com.heapvortex.exception.GlobalExceptionHandler;
 import com.heapvortex.exception.HeapTooLargeException;
 import com.heapvortex.exception.InvalidRequestException;
@@ -114,5 +111,27 @@ class HeapGraphControllerTest {
         mockMvc.perform(get("/api/heapdumps/d1/objects/0x3e8").param("maxReferences", "7"));
 
         verify(service).object("d1", "0x3e8", 7);
+    }
+
+    @Test
+    void pathToGcRootUsesTheDefaultDepth() throws Exception {
+        when(service.pathToGcRoot("d1", "0x3e9", 100)).thenReturn(new GcRootPathDto(
+                "0x3e9", true, "THREAD_OBJECT",
+                List.of(new GcRootPathDto.PathNode("0x3e8", "Child", null),
+                        new GcRootPathDto.PathNode("0x3e9", "Child", "next"))));
+
+        mockMvc.perform(get("/api/heapdumps/d1/objects/0x3e9/path-to-gc-root"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pathFound").value(true))
+                .andExpect(jsonPath("$.rootKind").value("THREAD_OBJECT"))
+                .andExpect(jsonPath("$.path[1].referenceFromPrevious").value("next"));
+    }
+
+    @Test
+    void pathToGcRootRejectsADepthOutOfRange() throws Exception {
+        mockMvc.perform(get("/api/heapdumps/d1/objects/0x1/path-to-gc-root").param("maxDepth", "0"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/heapdumps/d1/objects/0x1/path-to-gc-root").param("maxDepth", "1001"))
+                .andExpect(status().isBadRequest());
     }
 }
