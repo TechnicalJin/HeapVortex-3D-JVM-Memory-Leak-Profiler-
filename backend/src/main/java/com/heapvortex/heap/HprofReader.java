@@ -11,6 +11,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 
 /** Streaming reader for the HPROF heap dump format. */
 public final class HprofReader {
@@ -35,6 +36,8 @@ public final class HprofReader {
     private static final int PRIMITIVE_ARRAY_DUMP = 0x23;
 
     private static final int MAX_STRING_BYTES = 16 * 1024 * 1024;
+
+    private static final int MAX_ARRAY_ELEMENTS = 10_000_000;
 
     private final Input in;
     private final HprofVisitor visitor;
@@ -166,20 +169,35 @@ public final class HprofReader {
             in.skip(PrimitiveTypes.size(type, idSize));
         }
 
-        int staticFields = in.readU2();
-        for (int i = 0; i < staticFields; i++) {
-            in.skip(idSize); // field name
+        int staticCount = in.readU2();
+        long[] staticNames = new long[staticCount];
+        long[] staticReferences = new long[staticCount];
+        int referenceStatics = 0;
+        for (int i = 0; i < staticCount; i++) {
+            long nameId = readId();
             int type = in.readU1();
-            in.skip(PrimitiveTypes.size(type, idSize));
+            if (type == 2) {
+                staticNames[referenceStatics] = nameId;
+                staticReferences[referenceStatics] = readId();
+                referenceStatics++;
+            } else {
+                in.skip(PrimitiveTypes.size(type, idSize));
+            }
         }
 
-        int instanceFields = in.readU2();
-        for (int i = 0; i < instanceFields; i++) {
-            in.skip(idSize); // field name
-            in.readU1(); // field type
+        int fieldCount = in.readU2();
+        long[] fieldNames = new long[fieldCount];
+        int[] fieldTypes = new int[fieldCount];
+        for (int i = 0; i < fieldCount; i++) {
+            fieldNames[i] = readId();
+            fieldTypes[i] = in.readU1();
         }
 
         visitor.onClassDump(classId, superClassId, instanceSize);
+        visitor.onClassDefinition(new ClassDefinition(
+                classId, superClassId, fieldNames, fieldTypes,
+                Arrays.copyOf(staticNames, referenceStatics),
+                Arrays.copyOf(staticReferences, referenceStatics)));
     }
 
     private void readInstanceDump() throws IOException {
@@ -190,8 +208,12 @@ public final class HprofReader {
         if (dataLength > Integer.MAX_VALUE) {
             throw new HprofFormatException("Instance data is too large");
         }
-        in.skip(dataLength);
         visitor.onInstance(objectId, classId, (int) dataLength);
+        if (visitor.wantsDetails()) {
+            visitor.onInstanceData(objectId, classId, in.readBytes((int) dataLength));
+        } else {
+            in.skip(dataLength);
+        }
     }
 
     private void readObjectArrayDump() throws IOException {
@@ -202,8 +224,16 @@ public final class HprofReader {
         if (length < 0) {
             throw new HprofFormatException("Negative array length");
         }
-        in.skip((long) length * idSize);
         visitor.onObjectArray(arrayId, arrayClassId, length);
+        if (visitor.wantsDetails() && length <= MAX_ARRAY_ELEMENTS) {
+            long[] elements = new long[length];
+            for (int i = 0; i < length; i++) {
+                elements[i] = readId();
+            }
+            visitor.onObjectArrayElements(arrayId, arrayClassId, elements);
+        } else {
+            in.skip((long) length * idSize);
+        }
     }
 
     private void readPrimitiveArrayDump() throws IOException {

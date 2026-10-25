@@ -26,4 +26,17 @@ public interface HprofVisitor {
 
     default void onPrimitiveArray(long arrayId, int elementType, int length) {
     }
+
+    default boolean wantsDetails() {
+        return false;
+    }
+
+    default void onClassDefinition(ClassDefinition definition) {
+    }
+
+    default void onInstanceData(long objectId, long classObjectId, byte[] data) {
+    }
+
+    default void onObjectArrayElements(long arrayId, long arrayClassId, long[] elements) {
+    }
 }
