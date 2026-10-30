@@ -58,10 +58,11 @@ public class HeapStreamHandler extends TextWebSocketHandler {
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
     private final Map<String, ScheduledFuture<?>> telemetryTasks = new ConcurrentHashMap<>();
 
-    public HeapStreamHandler(ObjectMapper mapper,
-                             SubgraphService subgraphService,
+    public HeapStreamHandler(SubgraphService subgraphService,
                              JvmTelemetryService telemetryService) {
-        this.mapper = mapper;
+        this.mapper = new ObjectMapper()
+                .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
+                .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
         this.subgraphService = subgraphService;
         this.telemetryService = telemetryService;
     }
