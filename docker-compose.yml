@@ -1,0 +1,17 @@
+services:
+  backend:
+    build: ./backend
+    environment:
+      START_LEAKY_APP: "true"
+    ports:
+      - "8080:8080"
+    volumes:
+      - dumps:/app/dumps
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+volumes:
+  dumps:
