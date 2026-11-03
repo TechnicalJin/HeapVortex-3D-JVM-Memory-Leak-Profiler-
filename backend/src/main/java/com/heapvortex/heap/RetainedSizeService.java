@@ -102,7 +102,7 @@ public class RetainedSizeService {
                     ObjectIds.format(graph.idAt(current)),
                     heap.displayName(current),
                     dom.retainedBytes(current),
-                    likelyLeakClass(tally),
+                    likelyLeakClass(tally, chain),
                     classRetention(tally),
                     path));
         }
@@ -155,7 +155,7 @@ public class RetainedSizeService {
      * Heuristic: the application class with the most instances below the accumulation point.
      * JDK classes and arrays are skipped. If nothing is left, the type with the most bytes wins.
      */
-    private static String likelyLeakClass(Map<String, long[]> tally) {
+    private static String likelyLeakClass(Map<String, long[]> tally, List<String> chain) {
         String best = null;
         long[] bestStats = null;
         for (Map.Entry<String, long[]> entry : tally.entrySet()) {
@@ -172,6 +172,13 @@ public class RetainedSizeService {
         }
         if (best != null) {
             return best;
+        }
+        // Only JDK types are left (for example HashMap$Node[] and byte[]): name the application class that holds them.
+        for (String name : chain) {
+            String clean = name.startsWith("class ") ? name.substring("class ".length()) : name;
+            if (!clean.endsWith("[]") && !isJdkClass(clean)) {
+                return clean;
+            }
         }
         return tally.entrySet().stream()
                 .max(Comparator.comparingLong(e -> e.getValue()[1]))

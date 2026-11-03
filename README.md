@@ -62,3 +62,22 @@ The whole object graph is held in memory (default cap 2,000,000 objects, see
 heapvortex.analysis.max-objects). Only reference fields become graph edges. Weak
 references (the referent field) are ignored for dominators. The Attach API only sees
 JVMs on the same machine or container as the backend.
+
+Mid-project review evidence (2026-11-03)
+
+Backend tests: 165 run, 0 failures (docs/backend-test-output.txt)
+Frontend tests: 22 run, 0 failures
+
+Extraction audit (docs/audit-evidence.txt):
+attached to mock JVM, took 2 dumps
+dominator suspect: LeakyApp retains 12,020,507 bytes, leak class
+com.heapvortex.mock.LeakyApp$LeakedSession, root kind STICKY_CLASS
+growth between dumps: LeakedSession +194 instances, byte[] +6,358,371 bytes
+
+Rendering check (Chrome, instanced rendering, synthetic graph):
+10,000 nodes / 9,999 edges: 29 to 59 FPS, no crash
+20,000 nodes / 19,999 edges: 34 to 54 FPS, no crash
+Chrome tab memory with the graph loaded: about 190 MB
+
+Limits: above 1,500 nodes the view uses the solar layout only. A dump over
+2,000,000 objects is rejected (heapvortex.analysis.max-objects).

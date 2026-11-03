@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls, Html } from "@react-three/drei";
+import { OrbitControls, Html, Stats } from "@react-three/drei";
+import InstancedGraph from "./InstancedGraph.jsx";
 import * as THREE from "three";
 import {
     forceSimulation,
     forceManyBody,
     forceLink,
     forceCenter,
+    forceX,
+    forceY,
+    forceZ,
 } from "d3-force-3d";
 
 import { computeTargets } from "../utils/solarLayout.js";
@@ -104,6 +108,8 @@ function Graph({
 
         sim.current?.stop();
 
+        // The x, y and z forces pull every node gently towards the centre,
+        // so unconnected clusters cannot drift away from the screen.
         const s = forceSimulation(
             Array.from(next.values()),
             3
@@ -123,6 +129,9 @@ function Graph({
                 "center",
                 forceCenter(0, 0, 0)
             )
+            .force("x", forceX(0).strength(0.04))
+            .force("y", forceY(0).strength(0.04))
+            .force("z", forceZ(0).strength(0.04))
             .stop();
 
         s.alpha(layout === "force" ? 1 : 0);
@@ -338,28 +347,14 @@ function Graph({
 }
 
 export default function GraphScene(props) {
+    const instanced = props.instanced || props.nodes.size > 1500;
     return (
-        <Canvas
-            camera={{
-                position: [0, 0, 90],
-                fov: 60,
-            }}
-            onPointerMissed={() => props.onSelect(null)}
-        >
-            <color
-                attach="background"
-                args={["#0b1020"]}
-            />
-
+        <Canvas camera={{ position: [0, 0, 120], fov: 60, far: 5000 }} onPointerMissed={() => props.onSelect(null)}>
+            <color attach="background" args={["#0b1020"]} />
             <ambientLight intensity={0.6} />
-
-            <pointLight
-                position={[60, 60, 60]}
-                intensity={1.4}
-            />
-
-            <Graph {...props} />
-
+            <pointLight position={[60, 60, 60]} intensity={1.4} />
+            {instanced ? <InstancedGraph {...props} /> : <Graph {...props} />}
+            {instanced && <Stats />}
             <OrbitControls makeDefault />
         </Canvas>
     );

@@ -1,9 +1,9 @@
-
 import { useCallback, useEffect, useRef, useState } from 'react'
 import axios from 'axios'
 import GraphScene from './components/GraphScene.jsx'
 import { useHeapSocket } from './hooks/useHeapSocket.js'
 import { formatBytes, usagePercent } from './utils/format.js'
+import { generateGraph } from './utils/syntheticGraph.js'
 
 const panel = {
   position: 'absolute',
@@ -28,6 +28,7 @@ export default function App() {
   const [apiError, setApiError] = useState(null)
   const [layout, setLayout] = useState('solar')
   const [watch, setWatch] = useState(null)
+  const [stress, setStress] = useState(null)
 
   // Prevent repeatedly refreshing the dump list for the same automatic dump.
   const lastRefreshedDumpId = useRef('')
@@ -254,14 +255,22 @@ export default function App() {
   // UI
   // --------------------------------------------------
 
+  const view = stress ?? {
+    nodes: heap.nodes,
+    edges: heap.edges,
+    rootId: heap.rootId,
+    version: heap.version,
+  }
+
   return (
       <div style={{ position: 'fixed', inset: 0 }}>
         <GraphScene
-            nodes={heap.nodes}
-            edges={heap.edges}
-            version={heap.version}
-            rootId={heap.rootId}
+            nodes={view.nodes}
+            edges={view.edges}
+            version={view.version}
+            rootId={view.rootId}
             layout={layout}
+            instanced={Boolean(stress)}
             selectedId={selected?.id}
             onSelect={setSelected}
             onExpand={expand}
@@ -308,6 +317,13 @@ export default function App() {
             >
               {watch ? 'Stop leak watch' : 'Start leak watch'}
             </button>
+
+            <button
+                onClick={refresh}
+                style={{ marginTop: 4, marginLeft: 4 }}
+            >
+              Refresh lists
+            </button>
           </div>
 
           {/* Heap dump selection */}
@@ -328,7 +344,7 @@ export default function App() {
 
             <button
                 disabled={!dumpId || heap.loading}
-                onClick={() => heap.overview(dumpId)}
+                onClick={() => { setStress(null); heap.overview(dumpId) }}
                 style={{ marginTop: 4 }}
             >
               Load overview
@@ -343,6 +359,24 @@ export default function App() {
             </button>
           </div>
 
+          {/* Synthetic graph stress tests */}
+          <div style={{ marginBottom: 6 }}>
+            Stress test:{' '}
+            {[10000, 20000].map((n) => (
+                <button
+                    key={n}
+                    onClick={() =>
+                        setStress({ ...generateGraph(n), version: Date.now() })
+                    }
+                >
+                  {n / 1000}k
+                </button>
+            ))}{' '}
+            {stress && (
+                <button onClick={() => setStress(null)}>Exit</button>
+            )}
+          </div>
+
           {/* Layout toggle */}
           <div style={{ marginBottom: 6 }}>
             Layout:{' '}
@@ -355,6 +389,11 @@ export default function App() {
             >
               {layout === 'solar' ? 'Solar system' : 'Force graph'} (switch)
             </button>
+          </div>
+
+          {/* Rendered graph size, used as evidence for the rendering check */}
+          <div style={{ marginBottom: 6 }}>
+            Nodes {view.nodes.size} / Edges {view.edges.size}
           </div>
 
           {heap.loading && <div>Loading graph...</div>}
@@ -468,6 +507,25 @@ export default function App() {
                 through {suspect.topClassName})
               </div>
 
+              {(() => {
+                const path = suspect.pathToGcRoot?.path ?? []
+                let i = path.length - 1
+
+                while (
+                    i > 0 &&
+                    !String(path[i].referenceFromPrevious || '').startsWith('static ')
+                    ) {
+                  i--
+                }
+
+                return i > 0 ? (
+                    <div>
+                      Held by {path[i - 1].typeName} through{' '}
+                      {path[i].referenceFromPrevious}
+                    </div>
+                ) : null
+              })()}
+
               <button
                   style={{ marginTop: 6 }}
                   onClick={() =>
@@ -480,6 +538,21 @@ export default function App() {
                   }
               >
                 Show it in 3D
+              </button>
+
+              <button
+                  style={{ marginTop: 6, marginLeft: 4 }}
+                  onClick={() => {
+                    setStress(null)
+                    heap.expand(
+                        dumpId,
+                        suspect.accumulationObjectId,
+                        6,
+                        10000,
+                    )
+                  }}
+              >
+                Load up to 10,000 real nodes
               </button>
             </div>
         )}
