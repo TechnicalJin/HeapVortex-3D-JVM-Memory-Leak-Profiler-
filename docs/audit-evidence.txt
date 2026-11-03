@@ -1,0 +1,24 @@
+HeapVortex extraction audit - 2026-11-03 15:27:21
+[INFO] Building  0.0.1-SNAPSHOT
+[INFO] Running com.heapvortex.audit.ExtractionAuditTest
+15:27:02.145 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.heapvortex.audit.ExtractionAuditTest]: ExtractionAuditTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+15:27:02.308 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.heapvortex.BackendApplication for test class com.heapvortex.audit.ExtractionAuditTest
+15:27:02.436 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.heapvortex.audit.ExtractionAuditTest]: ExtractionAuditTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+15:27:02.437 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.heapvortex.BackendApplication for test class com.heapvortex.audit.ExtractionAuditTest
+2026-11-03T15:27:02.896+05:30  INFO 9760 --- [heapvortex-backend] [           main] c.heapvortex.audit.ExtractionAuditTest   : Starting ExtractionAuditTest using Java 21.0.12.1 with PID 9760 (started by N in D:\HeapVortex\backend)
+2026-11-03T15:27:02.899+05:30  INFO 9760 --- [heapvortex-backend] [           main] c.heapvortex.audit.ExtractionAuditTest   : No active profile set, falling back to 1 default profile: "default"
+2026-11-03T15:27:05.549+05:30  INFO 9760 --- [heapvortex-backend] [           main] c.heapvortex.audit.ExtractionAuditTest   : Started ExtractionAuditTest in 3.044 seconds (process running for 4.625)
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+AUDIT attached to mock JVM pid=13776
+AUDIT dumps: baseline=heap-13776-20261103-152711 later=heap-13776-20261103-152718
+AUDIT dominator suspect: top=class com.heapvortex.mock.LeakyApp retained=12020507 chain=[class com.heapvortex.mock.LeakyApp, java.util.ArrayList, java.lang.Object[]] accumulation=java.lang.Object[] leakClass=com.heapvortex.mock.LeakyApp$LeakedSession rootKind=STICKY_CLASS
+AUDIT dominator suspect: top=class java.time.zone.ZoneRulesProvider retained=186629 chain=[class java.time.zone.ZoneRulesProvider] accumulation=class java.time.zone.ZoneRulesProvider leakClass=byte[] rootKind=STICKY_CLASS
+AUDIT dominator suspect: top=class sun.util.calendar.ZoneInfoFile retained=129762 chain=[class sun.util.calendar.ZoneInfoFile] accumulation=class sun.util.calendar.ZoneInfoFile leakClass=byte[] rootKind=STICKY_CLASS
+AUDIT growth: byte[] +390 instances, +6358371 bytes
+AUDIT growth: int[] +89 instances, +16824 bytes
+AUDIT growth: com.heapvortex.mock.LeakyApp$LeakedSession +194 instances, +4656 bytes
+AUDIT growth: java.lang.String +196 instances, +2744 bytes
+AUDIT growth: java.lang.Object[] +0 instances, +976 bytes
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 17.29 s -- in com.heapvortex.audit.ExtractionAuditTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS

@@ -1,0 +1,54 @@
+﻿HeapVortex - Rendering Check Evidence
+Date: 2026-11-03
+
+1. Synthetic Graph Performance (Chrome)
+
+10,000 nodes / 9,999 edges
+FPS: 29–59
+Result: No crash
+
+20,000 nodes / 19,999 edges
+FPS: 34–54
+Result: No crash
+
+Chrome tab memory:
+Approximately 190 MB
+
+2. Real JVM Graph Test
+
+JVM: 18680
+Application: com.heapvortex.mock.LeakyApp
+
+Real graph:
+10,000 nodes / 9,999 edges
+Result: Successfully loaded
+
+400-node graph:
+400 nodes / 399 edges
+Solar system layout: Verified
+Force graph layout: Verified
+Force graph remained centred.
+
+3. Leak Visualization
+
+Leak class:
+com.heapvortex.mock.LeakyApp
+
+Retained heap:
+120.8 MB (98.4%)
+
+Holder:
+class com.heapvortex.mock.LeakyApp
+
+Static reference:
+SESSIONS
+
+4. Known Limitations
+
+Above 1,500 nodes, the renderer uses solar layout only.
+A dump over 2,000,000 objects is rejected
+(heapvortex.analysis.max-objects).
+
+Note:
+Synthetic graph FPS measurements are separate from
+real JVM graph verification.
