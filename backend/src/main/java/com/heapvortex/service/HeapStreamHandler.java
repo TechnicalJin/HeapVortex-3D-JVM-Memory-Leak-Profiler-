@@ -43,7 +43,7 @@ public class HeapStreamHandler extends TextWebSocketHandler {
 
     private static final int NODE_BATCH = 200;
     private static final int EDGE_BATCH = 500;
-    private static final int MAX_NODES = 2000;
+    private static final int MAX_NODES = 20000;
     private static final int MAX_DEPTH = 6;
 
     /** What the client may send. Fields that a request type does not use stay null. */

@@ -172,7 +172,7 @@ class RetainedSizeServiceTest {
         assertEquals("com.app.Leaked", s.likelyLeakClass());
         assertTrue(s.dominatedClasses().stream()
                 .anyMatch(c -> c.className().equals("com.app.Leaked") && c.instanceCount() == 10));
-        assertTrue(s.pathToGcRoot().found());
+        assertTrue(s.pathToGcRoot().pathFound());
     }
 
     @Test
@@ -211,5 +211,23 @@ class RetainedSizeServiceTest {
         assertEquals(List.of("com.app.Holder"), s.dominatorChain());
         assertEquals(s.topObjectId(), s.accumulationObjectId());
         assertEquals(210, s.accumulationRetainedBytes());
+    }
+
+    @Test
+    void namesTheHolderWhenOnlyJdkClassesAreBelow() {
+        // Holder -> Object[] -> 5 Strings. Only JDK types are below the accumulation point,
+        // so the application class on the dominator chain is named instead.
+        Builder b = new Builder();
+        int holder = b.node(16, HOLDER);
+        int array = b.node(40, ARRAY);
+        b.root(holder);
+        b.edge(holder, array);
+        for (int i = 0; i < 5; i++) {
+            b.edge(array, b.node(300, STRING));
+        }
+
+        DominatorSuspectDto s = serviceFor(b.build()).suspects("dump", 1, 100).get(0);
+
+        assertEquals("com.app.Holder", s.likelyLeakClass());
     }
 }
