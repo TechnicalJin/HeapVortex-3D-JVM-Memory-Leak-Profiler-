@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { appendGcEvent } from "../utils/gcLog.js";
 
 const WS_URL = "ws://localhost:8080/ws/heap";
 
 /**
  * Keeps the socket open, collects the node and edge batches into maps,
- * and exposes the latest telemetry. "version" changes when a graph answer is complete.
+ * and exposes the live telemetry, the JMX memory pools and the GC events.
+ * "version" changes when a graph answer is complete.
  * "rootId" is the object the last graph answer was centred on (null for the overview).
  */
 export function useHeapSocket() {
@@ -18,6 +20,8 @@ export function useHeapSocket() {
     const [truncated, setTruncated] = useState(false);
     const [error, setError] = useState(null);
     const [telemetry, setTelemetry] = useState(null);
+    const [pools, setPools] = useState([]);
+    const [gcEvents, setGcEvents] = useState([]);
 
     useEffect(() => {
         let closed = false;
@@ -61,6 +65,12 @@ export function useHeapSocket() {
                 case "telemetry":
                     setTelemetry(m.data);
                     break;
+                case "pools":
+                    setPools(m.data);
+                    break;
+                case "gc":
+                    setGcEvents((previous) => appendGcEvent(previous, m.data));
+                    break;
                 case "error":
                     setError(m.message);
                     setLoading(false);
@@ -102,6 +112,16 @@ export function useHeapSocket() {
 
     const stopTelemetry = useCallback(() => send({ type: "stopTelemetry" }), [send]);
 
+    const startGcEvents = useCallback(
+        (pid) => {
+            setGcEvents([]);
+            send({ type: "gcEvents", pid });
+        },
+        [send]
+    );
+
+    const stopGcEvents = useCallback(() => send({ type: "stopGcEvents" }), [send]);
+
     return {
         nodes: nodes.current,
         edges: edges.current,
@@ -112,9 +132,13 @@ export function useHeapSocket() {
         truncated,
         error,
         telemetry,
+        pools,
+        gcEvents,
         overview,
         expand,
         startTelemetry,
         stopTelemetry,
+        startGcEvents,
+        stopGcEvents,
     };
 }

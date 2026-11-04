@@ -32,9 +32,13 @@ import java.util.concurrent.TimeUnit;
  *   {"type":"expand","dumpId":"heap-123-...","objectId":"0x7f3a","depth":2,"maxNodes":500}
  *   {"type":"telemetry","pid":"1234","intervalMs":1000}
  *   {"type":"stopTelemetry"}
+ *   {"type":"gcEvents","pid":"1234"}
+ *   {"type":"stopGcEvents"}
  *
  * A graph answer arrives as: "start", several "nodes" batches, several "edges" batches, "done".
- * Telemetry arrives as {"type":"telemetry","data":{...}} on every tick. Errors as {"type":"error","message":"..."}.
+ * Telemetry arrives as {"type":"telemetry","data":{...}} and {"type":"pools","data":[...]} on every tick.
+ * Every garbage collection arrives as {"type":"gc","data":{...}} the moment it happens.
+ * Errors arrive as {"type":"error","message":"..."}.
  */
 @Component
 public class HeapStreamHandler extends TextWebSocketHandler {
@@ -54,17 +58,24 @@ public class HeapStreamHandler extends TextWebSocketHandler {
     private final ObjectMapper mapper;
     private final SubgraphService subgraphService;
     private final JvmTelemetryService telemetryService;
+    private final MemoryPoolService poolService;
+    private final GcEventService gcEventService;
     private final ExecutorService workers = Executors.newFixedThreadPool(4);
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
     private final Map<String, ScheduledFuture<?>> telemetryTasks = new ConcurrentHashMap<>();
+    private final Map<String, GcEventService.Subscription> gcSubscriptions = new ConcurrentHashMap<>();
 
     public HeapStreamHandler(SubgraphService subgraphService,
-                             JvmTelemetryService telemetryService) {
+                             JvmTelemetryService telemetryService,
+                             MemoryPoolService poolService,
+                             GcEventService gcEventService) {
         this.mapper = new ObjectMapper()
                 .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
                 .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
         this.subgraphService = subgraphService;
         this.telemetryService = telemetryService;
+        this.poolService = poolService;
+        this.gcEventService = gcEventService;
     }
 
     @Override
@@ -95,6 +106,8 @@ public class HeapStreamHandler extends TextWebSocketHandler {
             }));
             case "telemetry" -> startTelemetry(session, request);
             case "stopTelemetry" -> stopTelemetry(session.getId());
+            case "gcEvents" -> workers.submit(() -> run(session, () -> startGcEvents(session, request)));
+            case "stopGcEvents" -> stopGcEvents(session.getId());
             default -> send(session, msg("error", "message", "Unknown type: " + request.type()));
         }
     }
@@ -102,12 +115,15 @@ public class HeapStreamHandler extends TextWebSocketHandler {
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         stopTelemetry(session.getId());
+        stopGcEvents(session.getId());
     }
 
     @PreDestroy
     public void shutdown() {
         scheduler.shutdownNow();
         workers.shutdownNow();
+        gcSubscriptions.values().forEach(GcEventService.Subscription::close);
+        gcSubscriptions.clear();
     }
 
     private void startTelemetry(WebSocketSession session, StreamRequest request) {
@@ -122,6 +138,7 @@ public class HeapStreamHandler extends TextWebSocketHandler {
         ScheduledFuture<?> task = scheduler.scheduleWithFixedDelay(() -> {
             try {
                 send(session, msg("telemetry", "data", telemetryService.collect(pid)));
+                send(session, msg("pools", "data", poolService.collect(pid)));
             } catch (RuntimeException e) {
                 send(session, msg("error", "message", "Telemetry stopped: " + e.getMessage()));
                 stopTelemetry(session.getId());
@@ -134,6 +151,28 @@ public class HeapStreamHandler extends TextWebSocketHandler {
         ScheduledFuture<?> task = telemetryTasks.remove(sessionId);
         if (task != null) {
             task.cancel(false);
+        }
+    }
+
+    private void startGcEvents(WebSocketSession session, StreamRequest request) {
+        if (request.pid() == null || request.pid().isBlank()) {
+            send(session, msg("error", "message", "pid is required"));
+            return;
+        }
+        stopGcEvents(session.getId());
+        GcEventService.Subscription subscription = gcEventService.subscribe(
+                request.pid(), event -> send(session, msg("gc", "data", event)));
+        if (!session.isOpen()) {
+            subscription.close(); // the browser left while the subscription was being set up
+            return;
+        }
+        gcSubscriptions.put(session.getId(), subscription);
+    }
+
+    private void stopGcEvents(String sessionId) {
+        GcEventService.Subscription subscription = gcSubscriptions.remove(sessionId);
+        if (subscription != null) {
+            subscription.close();
         }
     }
 

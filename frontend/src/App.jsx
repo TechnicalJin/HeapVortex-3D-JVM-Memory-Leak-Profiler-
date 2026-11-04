@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import axios from 'axios'
 import GraphScene from './components/GraphScene.jsx'
+import LiveMetricsPanel from './components/LiveMetricsPanel.jsx'
 import { useHeapSocket } from './hooks/useHeapSocket.js'
 import { formatBytes, usagePercent } from './utils/format.js'
+import { splitClassName } from './utils/classNames.js'
 import { generateGraph } from './utils/syntheticGraph.js'
 
 const panel = {
@@ -14,6 +16,9 @@ const panel = {
   fontFamily: 'system-ui, sans-serif',
   fontSize: 13,
 }
+
+// Panels inside the right-hand column are stacked by the column, not positioned by themselves.
+const card = { ...panel, position: 'static' }
 
 export default function App() {
   const heap = useHeapSocket()
@@ -59,20 +64,22 @@ export default function App() {
   }, [refresh])
 
   // --------------------------------------------------
-  // Live JVM telemetry
+  // Live JVM telemetry, memory pools and GC events
   // --------------------------------------------------
 
-  const { status, startTelemetry, stopTelemetry } = heap
+  const { status, startTelemetry, stopTelemetry, startGcEvents, stopGcEvents } = heap
 
   useEffect(() => {
     if (status !== 'open') return
 
     if (pid) {
       startTelemetry(pid)
+      startGcEvents(pid)
     } else {
       stopTelemetry()
+      stopGcEvents()
     }
-  }, [pid, status, startTelemetry, stopTelemetry])
+  }, [pid, status, startTelemetry, stopTelemetry, startGcEvents, stopGcEvents])
 
   // --------------------------------------------------
   // Manual heap dump
@@ -209,11 +216,6 @@ export default function App() {
             setSelected(null)
           }
         }
-
-        // The backend removes a failed watch and reports ERROR.
-        if (updatedWatch.state === 'ERROR') {
-          setWatch(updatedWatch)
-        }
       } catch {
         // A temporary polling failure is retried on the next interval.
       }
@@ -250,6 +252,19 @@ export default function App() {
           : watch?.state === 'ERROR'
               ? '#fbbf24'
               : '#e2e8f0'
+
+  // The static reference nearest to the leaked object is the real holder.
+  // Example: class LeakyApp through static SESSIONS (not the JDK launcher further up the path).
+  const holderPath = suspect?.pathToGcRoot?.path ?? []
+  let holderIndex = holderPath.length - 1
+  while (
+      holderIndex > 0 &&
+      !String(holderPath[holderIndex].referenceFromPrevious || '').startsWith('static ')
+      ) {
+    holderIndex--
+  }
+
+  const selectedClass = selected ? splitClassName(selected.label) : null
 
   // --------------------------------------------------
   // UI
@@ -411,87 +426,107 @@ export default function App() {
           )}
 
           <div style={{ opacity: 0.7, marginTop: 6 }}>
-            Click a sphere to select it, double-click to expand it.
+            Hover a sphere for its class and memory, click to select it,
+            double-click to expand it.
           </div>
         </div>
 
-        {/* Live JVM telemetry */}
-        {heap.telemetry && (
-            <div style={{ ...panel, top: 12, right: 12, width: 240 }}>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                Live JVM {heap.telemetry.pid}
-              </div>
+        {/* Right-hand column: live telemetry, leak watch, memory pools and GC events */}
+        <div
+            style={{
+              position: 'absolute',
+              top: 12,
+              right: 12,
+              width: 270,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+              maxHeight: 'calc(100vh - 260px)',
+              overflowY: 'auto',
+            }}
+        >
+          {heap.telemetry && (
+              <div style={card}>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                  Live JVM {heap.telemetry.pid}
+                </div>
 
-              <div>
-                Heap {formatBytes(memory?.heapUsed)} /{' '}
-                {formatBytes(memory?.heapMax)}
-              </div>
+                <div>
+                  Heap {formatBytes(memory?.heapUsed)} /{' '}
+                  {formatBytes(memory?.heapMax)}
+                </div>
 
-              <div
-                  style={{
-                    background: '#334155',
-                    height: 8,
-                    borderRadius: 4,
-                    marginTop: 4,
-                  }}
-              >
                 <div
                     style={{
-                      width: `${Math.min(100, Math.max(0, heapPercent))}%`,
+                      background: '#334155',
                       height: 8,
                       borderRadius: 4,
-                      background: heapPercent > 80 ? '#ef4444' : '#3b82f6',
+                      marginTop: 4,
                     }}
-                />
+                >
+                  <div
+                      style={{
+                        width: `${Math.min(100, Math.max(0, heapPercent))}%`,
+                        height: 8,
+                        borderRadius: 4,
+                        background: heapPercent > 80 ? '#ef4444' : '#3b82f6',
+                      }}
+                  />
+                </div>
+
+                <div style={{ marginTop: 6 }}>
+                  Threads {heap.telemetry.threads?.threadCount ?? '-'}
+                </div>
+
+                {(heap.telemetry.gc || []).map((g) => (
+                    <div key={g.name}>
+                      {g.name}: {g.collectionCount} runs,{' '}
+                      {g.collectionTimeMs} ms
+                    </div>
+                ))}
               </div>
+          )}
 
-              <div style={{ marginTop: 6 }}>
-                Threads {heap.telemetry.threads?.threadCount ?? '-'}
+          {watch && (
+              <div style={card}>
+                <div
+                    style={{
+                      fontWeight: 600,
+                      color: watchColor,
+                      marginBottom: 6,
+                    }}
+                >
+                  Leak watch: {watch.state}
+                </div>
+
+                <div>{watch.message}</div>
+
+                <div style={{ marginTop: 6 }}>
+                  Floor samples: {watch.floorSamples}
+                </div>
+
+                <div>Heap used: {formatBytes(watch.heapUsed)}</div>
+
+                <div>
+                  Floor growth: {Number(watch.growthPercent ?? 0).toFixed(2)}%
+                </div>
+
+                {watch.dumpId && (
+                    <div style={{ marginTop: 6, overflowWrap: 'anywhere' }}>
+                      Automatic dump: {watch.dumpId}
+                    </div>
+                )}
               </div>
+          )}
 
-              {(heap.telemetry.gc || []).map((g) => (
-                  <div key={g.name}>
-                    {g.name}: {g.collectionCount} runs,{' '}
-                    {g.collectionTimeMs} ms
-                  </div>
-              ))}
-            </div>
-        )}
-
-        {/* Automatic leak-watch status */}
-        {watch && (
-            <div style={{ ...panel, top: 200, right: 12, width: 240 }}>
-              <div
-                  style={{
-                    fontWeight: 600,
-                    color: watchColor,
-                    marginBottom: 6,
-                  }}
-              >
-                Leak watch: {watch.state}
-              </div>
-
-              <div>{watch.message}</div>
-
-              <div style={{ marginTop: 6 }}>
-                Floor samples: {watch.floorSamples}
-              </div>
-
-              <div>
-                Heap used: {formatBytes(watch.heapUsed)}
-              </div>
-
-              <div>
-                Floor growth: {Number(watch.growthPercent ?? 0).toFixed(2)}%
-              </div>
-
-              {watch.dumpId && (
-                  <div style={{ marginTop: 6, overflowWrap: 'anywhere' }}>
-                    Automatic dump: {watch.dumpId}
-                  </div>
-              )}
-            </div>
-        )}
+          {pid && (heap.pools.length > 0 || heap.gcEvents.length > 0) && (
+              <LiveMetricsPanel
+                  pools={heap.pools}
+                  gcEvents={heap.gcEvents}
+                  style={card}
+              />
+          )}
+        </div>
 
         {/* Leak suspect details */}
         {suspect && (
@@ -507,24 +542,12 @@ export default function App() {
                 through {suspect.topClassName})
               </div>
 
-              {(() => {
-                const path = suspect.pathToGcRoot?.path ?? []
-                let i = path.length - 1
-
-                while (
-                    i > 0 &&
-                    !String(path[i].referenceFromPrevious || '').startsWith('static ')
-                    ) {
-                  i--
-                }
-
-                return i > 0 ? (
-                    <div>
-                      Held by {path[i - 1].typeName} through{' '}
-                      {path[i].referenceFromPrevious}
-                    </div>
-                ) : null
-              })()}
+              {holderIndex > 0 && (
+                  <div>
+                    Held by {holderPath[holderIndex - 1].typeName} through{' '}
+                    {holderPath[holderIndex].referenceFromPrevious}
+                  </div>
+              )}
 
               <button
                   style={{ marginTop: 6 }}
@@ -569,8 +592,12 @@ export default function App() {
                 }}
             >
               <div style={{ fontWeight: 600, wordBreak: 'break-all' }}>
-                {selected.label}
+                {selectedClass.name}
               </div>
+
+              {selectedClass.pkg && (
+                  <div style={{ opacity: 0.7 }}>{selectedClass.pkg}</div>
+              )}
 
               <div>Kind: {selected.kind}</div>
               <div>Object ID: {selected.id}</div>

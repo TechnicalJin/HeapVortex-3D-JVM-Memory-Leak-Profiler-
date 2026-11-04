@@ -1,23 +1,33 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Html } from "@react-three/drei";
 import * as THREE from "three";
 import { computeTargets } from "../utils/solarLayout.js";
+import NodeTooltip from "./NodeTooltip.jsx";
 
 const COLD = new THREE.Color("#3b82f6");
 const HOT = new THREE.Color("#ef4444");
+const HOVER_INTERVAL_MS = 60;
 
 function heat(percent) {
     const t = Math.min(1, Math.sqrt(Math.max(percent, 0) / 25));
     return COLD.clone().lerp(HOT, t);
 }
 
-/** Draws thousands of nodes with one instanced mesh. Layout is computed once per graph answer. */
+/**
+ * Draws thousands of nodes with one instanced mesh. Layout is computed once per graph answer.
+ * Click and hover use Three.js raycasting (through the React Three Fiber event system):
+ * the ray hits the instanced mesh and reports the index of the node under the pointer.
+ */
 export default function InstancedGraph({ nodes, edges, version, rootId, selectedId, onSelect, onExpand }) {
     const mesh = useRef();
+    const lastMove = useRef(0);
+    const [hoveredId, setHoveredId] = useState(null);
 
     const data = useMemo(() => {
         const list = Array.from(nodes.values());
         const targets = computeTargets(list, edges, rootId);
         const maxRetained = list.reduce((max, n) => Math.max(max, n.retainedBytes), 1);
+        const byId = new Map(list.map((n) => [n.id, n]));
 
         const positions = [];
         for (const e of edges.values()) {
@@ -25,7 +35,7 @@ export default function InstancedGraph({ nodes, edges, version, rootId, selected
             const b = targets.get(e.target);
             if (a && b) positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
         }
-        return { list, targets, maxRetained, linePositions: new Float32Array(positions) };
+        return { list, byId, targets, maxRetained, linePositions: new Float32Array(positions) };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [version, rootId]);
 
@@ -47,6 +57,8 @@ export default function InstancedGraph({ nodes, edges, version, rootId, selected
     }, [data]);
 
     const selected = selectedId ? data.targets.get(selectedId) : null;
+    const hovered = hoveredId ? data.byId.get(hoveredId) : null;
+    const hoveredPosition = hoveredId ? data.targets.get(hoveredId) : null;
 
     return (
         <group>
@@ -72,6 +84,20 @@ export default function InstancedGraph({ nodes, edges, version, rootId, selected
                     const n = data.list[e.instanceId];
                     if (n) onExpand(n);
                 }}
+                onPointerMove={(e) => {
+                    e.stopPropagation();
+                    // the ray test walks every instance, so it runs at most about 16 times per second
+                    const now = performance.now();
+                    if (now - lastMove.current < HOVER_INTERVAL_MS) return;
+                    lastMove.current = now;
+                    const id = data.list[e.instanceId]?.id ?? null;
+                    setHoveredId((current) => (current === id ? current : id));
+                    document.body.style.cursor = "pointer";
+                }}
+                onPointerOut={() => {
+                    setHoveredId(null);
+                    document.body.style.cursor = "auto";
+                }}
             >
                 <sphereGeometry args={[1, 10, 10]} />
                 <meshStandardMaterial />
@@ -82,6 +108,18 @@ export default function InstancedGraph({ nodes, edges, version, rootId, selected
                     <sphereGeometry args={[3.5, 16, 16]} />
                     <meshBasicMaterial color="#ffffff" wireframe />
                 </mesh>
+            )}
+
+            {hovered && hoveredPosition && (
+                <Html
+                    position={[hoveredPosition.x, hoveredPosition.y, hoveredPosition.z]}
+                    center
+                    style={{ pointerEvents: "none" }}
+                >
+                    <div style={{ transform: "translateY(-48px)" }}>
+                        <NodeTooltip node={hovered} />
+                    </div>
+                </Html>
             )}
         </group>
     );
