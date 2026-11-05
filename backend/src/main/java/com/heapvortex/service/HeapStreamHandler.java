@@ -60,6 +60,7 @@ public class HeapStreamHandler extends TextWebSocketHandler {
     private final JvmTelemetryService telemetryService;
     private final MemoryPoolService poolService;
     private final GcEventService gcEventService;
+    private final CpuMetricsService cpuService;
     private final ExecutorService workers = Executors.newFixedThreadPool(4);
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
     private final Map<String, ScheduledFuture<?>> telemetryTasks = new ConcurrentHashMap<>();
@@ -68,7 +69,8 @@ public class HeapStreamHandler extends TextWebSocketHandler {
     public HeapStreamHandler(SubgraphService subgraphService,
                              JvmTelemetryService telemetryService,
                              MemoryPoolService poolService,
-                             GcEventService gcEventService) {
+                             GcEventService gcEventService,
+                             CpuMetricsService cpuService) {
         this.mapper = new ObjectMapper()
                 .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
                 .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
@@ -76,6 +78,7 @@ public class HeapStreamHandler extends TextWebSocketHandler {
         this.telemetryService = telemetryService;
         this.poolService = poolService;
         this.gcEventService = gcEventService;
+        this.cpuService = cpuService;
     }
 
     @Override
@@ -142,6 +145,12 @@ public class HeapStreamHandler extends TextWebSocketHandler {
             } catch (RuntimeException e) {
                 send(session, msg("error", "message", "Telemetry stopped: " + e.getMessage()));
                 stopTelemetry(session.getId());
+                return;
+            }
+            try {
+                send(session, msg("cpu", "data", cpuService.collect(pid)));
+            } catch (RuntimeException e) {
+                log.debug("CPU metrics are not available for JVM {}", pid, e);
             }
         }, 0, interval, TimeUnit.MILLISECONDS);
         telemetryTasks.put(session.getId(), task);

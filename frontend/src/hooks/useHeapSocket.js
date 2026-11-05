@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { appendGcEvent } from "../utils/gcLog.js";
+import { pushSample } from "../utils/sparkline.js";
 
-const WS_URL = "ws://localhost:8080/ws/heap";
+const WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws/heap`;
 
 /**
- * Keeps the socket open, collects the node and edge batches into maps,
- * and exposes the live telemetry, the JMX memory pools and the GC events.
+ * Keeps the socket open, collects the node and edge batches into maps, and exposes the live
+ * telemetry, CPU, JMX memory pools, GC events and short history lists for the 2D charts.
  * "version" changes when a graph answer is complete.
  * "rootId" is the object the last graph answer was centred on (null for the overview).
  */
@@ -20,8 +21,11 @@ export function useHeapSocket() {
     const [truncated, setTruncated] = useState(false);
     const [error, setError] = useState(null);
     const [telemetry, setTelemetry] = useState(null);
+    const [cpu, setCpu] = useState(null);
     const [pools, setPools] = useState([]);
     const [gcEvents, setGcEvents] = useState([]);
+    const [heapHistory, setHeapHistory] = useState([]);
+    const [cpuHistory, setCpuHistory] = useState([]);
 
     useEffect(() => {
         let closed = false;
@@ -62,8 +66,20 @@ export function useHeapSocket() {
                     setLoading(false);
                     setVersion((v) => v + 1);
                     break;
-                case "telemetry":
+                case "telemetry": {
                     setTelemetry(m.data);
+                    const memory = m.data?.memory;
+                    if (memory?.heapMax > 0) {
+                        const percent = (100 * memory.heapUsed) / memory.heapMax;
+                        setHeapHistory((previous) => pushSample(previous, percent));
+                    }
+                    break;
+                }
+                case "cpu":
+                    setCpu(m.data);
+                    if (m.data?.processCpuPercent >= 0) {
+                        setCpuHistory((previous) => pushSample(previous, m.data.processCpuPercent));
+                    }
                     break;
                 case "pools":
                     setPools(m.data);
@@ -106,7 +122,14 @@ export function useHeapSocket() {
     );
 
     const startTelemetry = useCallback(
-        (pid) => send({ type: "telemetry", pid, intervalMs: 1000 }),
+        (pid) => {
+            setTelemetry(null);
+            setCpu(null);
+            setPools([]);
+            setHeapHistory([]);
+            setCpuHistory([]);
+            send({ type: "telemetry", pid, intervalMs: 1000 });
+        },
         [send]
     );
 
@@ -132,8 +155,11 @@ export function useHeapSocket() {
         truncated,
         error,
         telemetry,
+        cpu,
         pools,
         gcEvents,
+        heapHistory,
+        cpuHistory,
         overview,
         expand,
         startTelemetry,

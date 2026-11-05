@@ -1,9 +1,9 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import axios from 'axios'
 import App from './App.jsx'
 import { mockJvms } from './mocks/mockData.js'
 
-vi.mock('axios', () => ({ default: { get: vi.fn(), post: vi.fn() } }))
+vi.mock('axios', () => ({ default: { get: vi.fn(), post: vi.fn(), delete: vi.fn() } }))
 
 vi.mock('./components/GraphScene.jsx', () => ({
   default: () => <div data-testid="graph-scene" />,
@@ -16,19 +16,23 @@ vi.mock('./hooks/useHeapSocket.js', async () => {
       nodes: new Map(),
       edges: new Map(),
       version: 0,
+      rootId: null,
       status: 'open',
       loading: false,
       truncated: false,
       error: null,
       telemetry: mockMetrics('1001'),
+      cpu: { pid: '1001', processCpuPercent: 12.5, systemCpuPercent: 40, availableProcessors: 8 },
       pools: [],
       gcEvents: [],
-      startGcEvents: vi.fn(),
-      stopGcEvents: vi.fn(),
+      heapHistory: [10, 20, 30],
+      cpuHistory: [5, 12.5],
       overview: vi.fn(),
       expand: vi.fn(),
       startTelemetry: vi.fn(),
       stopTelemetry: vi.fn(),
+      startGcEvents: vi.fn(),
+      stopGcEvents: vi.fn(),
     }),
   }
 })
@@ -58,5 +62,21 @@ describe('App', () => {
     expect(screen.getByText(/512\.0 MB/)).toBeInTheDocument()
     expect(screen.getByText(/G1 Young Generation: 15 runs, 82 ms/)).toBeInTheDocument()
     await screen.findByText(/1001 LeakyApp/)
+  })
+
+  it('shows CPU in the metrics sidebar', async () => {
+    render(<App />)
+    expect(screen.getByText('Live metrics')).toBeInTheDocument()
+    expect(screen.getByText(/Process CPU 12\.5%/)).toBeInTheDocument()
+    expect(screen.getByText(/System CPU 40\.0% \(8 cores\)/)).toBeInTheDocument()
+    await screen.findByText(/1001 LeakyApp/)
+  })
+
+  it('hides the sidebar on request', async () => {
+    render(<App />)
+    await screen.findByText(/1001 LeakyApp/)
+    fireEvent.click(screen.getByText('Hide metrics'))
+    expect(screen.queryByText('Live metrics')).not.toBeInTheDocument()
+    expect(screen.getByText('Show metrics')).toBeInTheDocument()
   })
 })
