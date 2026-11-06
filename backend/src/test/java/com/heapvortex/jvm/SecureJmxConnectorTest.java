@@ -1,135 +1,194 @@
 package com.heapvortex.jvm;
 
+import com.heapvortex.mock.LeakyApp;
+import com.heapvortex.support.SecureJmxProbe;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
-import javax.management.MBeanServerConnection;
-import javax.management.remote.JMXConnector;
-import javax.management.remote.JMXConnectorFactory;
-import javax.management.remote.JMXConnectorServer;
-import javax.management.remote.JMXConnectorServerFactory;
-import javax.management.remote.JMXServiceURL;
-import javax.management.remote.rmi.RMIConnectorServer;
-import javax.net.ssl.SSLContext;
-import javax.rmi.ssl.SslRMIClientSocketFactory;
-import javax.rmi.ssl.SslRMIServerSocketFactory;
+import java.io.File;
 import java.io.IOException;
-import java.lang.management.ManagementFactory;
-import java.lang.management.RuntimeMXBean;
 import java.net.ServerSocket;
+import java.nio.file.Files;
 import java.nio.file.Path;
-import java.rmi.registry.LocateRegistry;
-import java.rmi.registry.Registry;
-import java.rmi.server.UnicastRemoteObject;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
-/** Week 4 audit: JMX over TLS. A JMX server with a self-signed certificate runs inside the test JVM. */
-@Timeout(60)
+/**
+ * Week 4 audit: JMX over TLS. A separate JVM exposes JMX with TLS and a self-signed certificate.
+ * Clients run in their own JVMs, because Java reads its trust settings only once per JVM.
+ */
+@Timeout(180)
 class SecureJmxConnectorTest {
 
-    private static final char[] PASSWORD = "changeit".toCharArray();
+    private static final String PASSWORD = "changeit";
+
+    private record Result(int exitCode, String output) {}
 
     @TempDir
     Path dir;
 
-    private SSLContext originalDefault;
-    private Path trustStore;
-    private Registry registry;
-    private JMXConnectorServer server;
+    private final String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+    private Process target;
+    private Path targetLog;
     private int port;
+    private Path trustStore;
 
     @BeforeEach
-    void startTlsServer() throws Exception {
-        originalDefault = SSLContext.getDefault();
-
+    void startSecureTarget() throws Exception {
         Path keyStore = dir.resolve("keystore.p12");
         Path certificate = dir.resolve("server.cer");
         trustStore = dir.resolve("truststore.p12");
+        targetLog = dir.resolve("target.log");
 
         keytool("-genkeypair", "-alias", "heapvortex", "-keyalg", "RSA", "-keysize", "2048",
-                "-validity", "2", "-dname", "CN=localhost", "-storetype", "PKCS12",
-                "-keystore", keyStore.toString(), "-storepass", "changeit");
+                "-validity", "2", "-dname", "CN=localhost",
+                "-ext", "SAN=dns:localhost,ip:127.0.0.1", "-storetype", "PKCS12",
+                "-keystore", keyStore.toString(), "-storepass", PASSWORD);
         keytool("-exportcert", "-alias", "heapvortex", "-keystore", keyStore.toString(),
-                "-storepass", "changeit", "-file", certificate.toString());
+                "-storepass", PASSWORD, "-file", certificate.toString());
         keytool("-importcert", "-noprompt", "-alias", "heapvortex", "-file", certificate.toString(),
-                "-keystore", trustStore.toString(), "-storetype", "PKCS12", "-storepass", "changeit");
-
-        SslRMIServerSocketFactory serverFactory =
-                new SslRMIServerSocketFactory(TlsSupport.serverContext(keyStore, PASSWORD), null, null, false);
-        SslRMIClientSocketFactory clientFactory = new SslRMIClientSocketFactory();
+                "-keystore", trustStore.toString(), "-storetype", "PKCS12", "-storepass", PASSWORD);
 
         port = freePort();
-        registry = LocateRegistry.createRegistry(port, clientFactory, serverFactory);
-
-        Map<String, Object> env = new HashMap<>();
-        env.put(RMIConnectorServer.RMI_CLIENT_SOCKET_FACTORY_ATTRIBUTE, clientFactory);
-        env.put(RMIConnectorServer.RMI_SERVER_SOCKET_FACTORY_ATTRIBUTE, serverFactory);
-        JMXServiceURL url = new JMXServiceURL("service:jmx:rmi://localhost/jndi/rmi://localhost:" + port + "/jmxrmi");
-        server = JMXConnectorServerFactory.newJMXConnectorServer(url, env, ManagementFactory.getPlatformMBeanServer());
-        server.start();
+        target = new ProcessBuilder(java, "-Xmx256m",
+                "-Dcom.sun.management.jmxremote.port=" + port,
+                "-Dcom.sun.management.jmxremote.rmi.port=" + port,
+                "-Dcom.sun.management.jmxremote.host=127.0.0.1",
+                "-Dcom.sun.management.jmxremote.authenticate=false",
+                "-Dcom.sun.management.jmxremote.ssl=true",
+                "-Dcom.sun.management.jmxremote.registry.ssl=true",
+                "-Djava.rmi.server.hostname=127.0.0.1",
+                "-Djavax.net.ssl.keyStore=" + keyStore,
+                "-Djavax.net.ssl.keyStorePassword=" + PASSWORD,
+                "-cp", codeSource(LeakyApp.class).toString(), LeakyApp.class.getName())
+                .redirectErrorStream(true)
+                .redirectOutput(targetLog.toFile())
+                .start();
     }
 
     @AfterEach
-    void stopTlsServer() throws Exception {
-        SSLContext.setDefault(originalDefault);
-        if (server != null) {
-            server.stop();
-        }
-        if (registry != null) {
-            UnicastRemoteObject.unexportObject(registry, true);
+    void stopSecureTarget() {
+        if (target != null) {
+            target.destroyForcibly();
         }
     }
 
     @Test
-    void readsMetricsOverTlsWhenTheCertificateIsTrusted() throws Exception {
-        SSLContext.setDefault(TlsSupport.clientContext(trustStore, PASSWORD));
+    void aClientThatTrustsTheCertificateCanReadMetrics() throws Exception {
+        waitUntilSecureJmxIsUp();
 
-        try (JMXConnector connector = SecureJmxConnector.connect("localhost", port)) {
-            MBeanServerConnection mbeans = connector.getMBeanServerConnection();
+        Result result = probe(true, false);
 
-            RuntimeMXBean runtime = ManagementFactory.getPlatformMXBean(mbeans, RuntimeMXBean.class);
-            assertEquals(ProcessHandle.current().pid(), runtime.getPid());
-
-            com.sun.management.OperatingSystemMXBean os = ManagementFactory.getPlatformMXBean(
-                    mbeans, com.sun.management.OperatingSystemMXBean.class);
-            assertTrue(os.getAvailableProcessors() > 0);
-            System.out.printf("WEEK4 TLS ok: pid=%d processors=%d cpuLoad=%.3f%n",
-                    runtime.getPid(), os.getAvailableProcessors(), os.getProcessCpuLoad());
-        }
+        assertEquals(0, result.exitCode(), result.output());
+        assertTrue(result.output().contains("PROBE_OK pid=" + target.pid()), result.output());
+        System.out.println("WEEK4 TLS trusted client: " + result.output().trim());
     }
 
     @Test
-    void refusesAClientThatDoesNotTrustTheCertificate() {
-        // the default context still trusts only the JDK certificate authorities, not our self-signed certificate
-        IOException error = assertThrows(IOException.class, () -> SecureJmxConnector.connect("localhost", port).close());
-        System.out.println("WEEK4 TLS refused untrusted client: " + rootCause(error).getClass().getSimpleName());
+    void aClientThatDoesNotTrustTheCertificateIsRefused() throws Exception {
+        waitUntilSecureJmxIsUp();
+
+        Result result = probe(false, false);
+
+        assertNotEquals(0, result.exitCode(), "an untrusted client must not get through: " + result.output());
+        System.out.println("WEEK4 TLS untrusted client refused: " + firstLineAbout(result.output(),
+                "PKIX", "SSLHandshakeException", "certificate"));
     }
 
     @Test
-    void refusesAPlainTextClient() {
-        assertThrows(IOException.class, () -> {
-            JMXServiceURL url = new JMXServiceURL("service:jmx:rmi:///jndi/rmi://localhost:" + port + "/jmxrmi");
-            JMXConnectorFactory.connect(url).close();
-        });
-        System.out.println("WEEK4 TLS refused plain-text client");
+    void aPlainTextClientIsRefused() throws Exception {
+        waitUntilSecureJmxIsUp();
+
+        Result result = probe(true, true);
+
+        assertNotEquals(0, result.exitCode(), "a plain-text client must not get through: " + result.output());
+        System.out.println("WEEK4 TLS plain-text client refused: " + firstLineAbout(result.output(),
+                "Exception", "refused", "non-JRMP"));
     }
 
-    private static Throwable rootCause(Throwable error) {
-        Throwable current = error;
-        while (current.getCause() != null && current.getCause() != current) {
-            current = current.getCause();
+    private void waitUntilSecureJmxIsUp() throws Exception {
+        long deadline = System.currentTimeMillis() + 30_000;
+        Result last = null;
+        while (System.currentTimeMillis() < deadline) {
+            last = probe(true, false);
+            if (last.exitCode() == 0) {
+                return;
+            }
+            if (!target.isAlive()) {
+                break;
+            }
+            Thread.sleep(1_500);
         }
-        return current;
+        fail("the secure JMX port " + port + " did not come up."
+                + "\ntarget JVM still running: " + target.isAlive()
+                + "\n--- last probe (exit code " + (last == null ? "n/a" : last.exitCode()) + ") ---\n"
+                + (last == null ? "" : tail(last.output()))
+                + "\n--- output of the target JVM ---\n" + tail(readQuietly(targetLog)));
+    }
+
+    private Result probe(boolean trusted, boolean plain) throws Exception {
+        List<String> command = new ArrayList<>();
+        command.add(java);
+        if (trusted) {
+            command.add("-Djavax.net.ssl.trustStore=" + trustStore);
+            command.add("-Djavax.net.ssl.trustStorePassword=" + PASSWORD);
+        }
+        command.add("-cp");
+        command.add(codeSource(SecureJmxProbe.class) + File.pathSeparator + codeSource(SecureJmxConnector.class));
+        command.add(SecureJmxProbe.class.getName());
+        command.add("127.0.0.1");
+        command.add(String.valueOf(port));
+        if (plain) {
+            command.add("plain");
+        }
+
+        Path log = Files.createTempFile(dir, "probe", ".log");
+        Process process = new ProcessBuilder(command)
+                .redirectErrorStream(true)
+                .redirectOutput(log.toFile())
+                .start();
+        boolean finished = process.waitFor(40, TimeUnit.SECONDS);
+        if (!finished) {
+            process.destroyForcibly();
+        }
+        String output = Files.readString(log);
+        return new Result(finished ? process.exitValue() : -1, output);
+    }
+
+    private static String firstLineAbout(String output, String... words) {
+        for (String line : output.split("\\R")) {
+            for (String word : words) {
+                if (line.contains(word)) {
+                    return line.trim();
+                }
+            }
+        }
+        return output.isBlank() ? "(no output)" : output.lines().findFirst().orElse("").trim();
+    }
+
+    private static String tail(String text) {
+        return text.length() <= 3000 ? text : "..." + text.substring(text.length() - 3000);
+    }
+
+    private static String readQuietly(Path file) {
+        try {
+            return Files.exists(file) ? Files.readString(file) : "";
+        } catch (IOException e) {
+            return "(cannot read " + file + ": " + e.getMessage() + ")";
+        }
+    }
+
+    private static Path codeSource(Class<?> type) throws Exception {
+        return Path.of(type.getProtectionDomain().getCodeSource().getLocation().toURI());
     }
 
     private static int freePort() throws IOException {
