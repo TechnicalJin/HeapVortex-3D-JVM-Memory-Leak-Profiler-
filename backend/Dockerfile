@@ -2,7 +2,8 @@ FROM eclipse-temurin:21-jdk AS build
 WORKDIR /app
 COPY .mvn .mvn
 COPY mvnw pom.xml ./
-RUN sed -i 's/\r$//' mvnw && chmod +x mvnw && ./mvnw -q dependency:go-offline
+RUN sed -i 's/\r$//' mvnw && chmod +x mvnw
+RUN ./mvnw -q dependency:go-offline || true
 COPY src src
 RUN ./mvnw -q -DskipTests package
 RUN mkdir /leaky && javac -d /leaky src/test/java/com/heapvortex/mock/LeakyApp.java
