@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Html, Stats } from "@react-three/drei";
 import InstancedGraph from "./InstancedGraph.jsx";
+import NodeTooltip from "./NodeTooltip.jsx";
 import * as THREE from "three";
 import {
     forceSimulation,
@@ -326,16 +327,25 @@ function Graph({
                                 <div
                                     style={{
                                         transform: `translateY(-${radius * 6 + 14}px)`,
-                                        background: "rgba(15, 23, 42, 0.9)",
-                                        color: "#e2e8f0",
-                                        padding: "2px 6px",
-                                        borderRadius: 4,
-                                        fontSize: 12,
-                                        fontFamily: "system-ui, sans-serif",
-                                        whiteSpace: "nowrap",
                                     }}
                                 >
-                                    {shortName(n.label)}
+                                    {hoveredId === n.id ? (
+                                        <NodeTooltip node={n} />
+                                    ) : (
+                                        <span
+                                            style={{
+                                                background: "rgba(15, 23, 42, 0.9)",
+                                                color: "#e2e8f0",
+                                                padding: "2px 6px",
+                                                borderRadius: 4,
+                                                fontSize: 12,
+                                                fontFamily: "system-ui, sans-serif",
+                                                whiteSpace: "nowrap",
+                                            }}
+                                        >
+                                            {shortName(n.label)}
+                                        </span>
+                                    )}
                                 </div>
                             </Html>
                         )}

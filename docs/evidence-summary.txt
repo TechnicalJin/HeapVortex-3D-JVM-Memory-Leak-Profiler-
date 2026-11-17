@@ -1,0 +1,31 @@
+﻿HeapVortex evidence summary - 2026-11-05 17:58:14
+
+BACKEND (exit code 0, full log: docs/test-results/backend-test-output.txt)
+AUDIT attached to mock JVM pid=10528
+AUDIT dumps: baseline=heap-10528-20261105-175721 later=heap-10528-20261105-175728
+AUDIT dominator suspect: top=class com.heapvortex.mock.LeakyApp retained=14712627 chain=[class com.heapvortex.mock.LeakyApp, java.util.ArrayList, java.lang.Object[]] accumulation=java.lang.Object[] leakClass=com.heapvortex.mock.LeakyApp$LeakedSession rootKind=STICKY_CLASS
+AUDIT dominator suspect: top=class java.time.zone.ZoneRulesProvider retained=186629 chain=[class java.time.zone.ZoneRulesProvider] accumulation=class java.time.zone.ZoneRulesProvider leakClass=byte[] rootKind=STICKY_CLASS
+AUDIT dominator suspect: top=class sun.util.calendar.ZoneInfoFile retained=129762 chain=[class sun.util.calendar.ZoneInfoFile] accumulation=class sun.util.calendar.ZoneInfoFile leakClass=byte[] rootKind=STICKY_CLASS
+AUDIT growth: byte[] +579 instances, +9471990 bytes
+AUDIT growth: int[] +110 instances, +309392 bytes
+AUDIT growth: com.heapvortex.mock.LeakyApp$LeakedSession +289 instances, +6936 bytes
+AUDIT growth: java.lang.String +290 instances, +4060 bytes
+AUDIT growth: java.lang.Object[] +0 instances, +3088 bytes
+WEEK3 pool: G1 Eden Space type=HEAP used=16777216 committed=24117248 max=-1
+WEEK3 pool: G1 Old Gen type=HEAP used=0 committed=235929600 max=268435456
+WEEK3 pool: G1 Survivor Space type=HEAP used=0 committed=0 max=-1
+WEEK3 pool: CodeHeap 'non-nmethods' type=NON_HEAP used=1421696 committed=2555904 max=5898240
+WEEK3 pool: CodeHeap 'non-profiled nmethods' type=NON_HEAP used=493440 committed=2555904 max=122880000
+WEEK3 pool: CodeHeap 'profiled nmethods' type=NON_HEAP used=2051200 committed=2555904 max=122880000
+WEEK3 pool: Compressed Class Space type=NON_HEAP used=755856 committed=917504 max=1073741824
+WEEK3 pool: Metaspace type=NON_HEAP used=6899864 committed=7208960 max=-1
+WEEK3 gc event: G1 Old Generation | end of major GC | cause=System.gc() | 9 ms | before=16777216 after=4115152 reclaimed=12662064
+WEEK4 TLS untrusted client refused: javax.net.ssl.SSLHandshakeException: (certificate_unknown) PKIX path building failed: sun.security.provider.certpath.SunCertPathBuilderException: unable to find valid certification path to requested target]
+WEEK4 TLS plain-text client refused: Exception in thread "main" java.io.IOException: Failed to retrieve RMIServer stub: javax.naming.CommunicationException [Root exception is java.rmi.ConnectIOException: non-JRMP server at remote endpoint]
+WEEK4 TLS trusted client: PROBE_OK pid=6412
+[INFO] Tests run: 174, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+
+FRONTEND (exit code 0, full log: docs/test-results/frontend-test-output.txt)
+Test Files  8 passed (8)
+Tests  37 passed (37)

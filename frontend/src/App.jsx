@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import axios from 'axios'
 import GraphScene from './components/GraphScene.jsx'
+import MetricsSidebar from './components/MetricsSidebar.jsx'
 import { useHeapSocket } from './hooks/useHeapSocket.js'
-import { formatBytes, usagePercent } from './utils/format.js'
+import { formatBytes } from './utils/format.js'
+import { splitClassName } from './utils/classNames.js'
 import { generateGraph } from './utils/syntheticGraph.js'
 
 const panel = {
@@ -15,10 +17,13 @@ const panel = {
   fontSize: 13,
 }
 
+const REMOTE_PREFIX = 'remote:'
+
 export default function App() {
   const heap = useHeapSocket()
 
   const [jvms, setJvms] = useState([])
+  const [remoteJvms, setRemoteJvms] = useState([])
   const [dumps, setDumps] = useState([])
   const [pid, setPid] = useState('')
   const [dumpId, setDumpId] = useState('')
@@ -29,9 +34,13 @@ export default function App() {
   const [layout, setLayout] = useState('solar')
   const [watch, setWatch] = useState(null)
   const [stress, setStress] = useState(null)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
 
   // Prevent repeatedly refreshing the dump list for the same automatic dump.
   const lastRefreshedDumpId = useRef('')
+
+  // A secure remote JVM gives live metrics only: the heap dump would be written on the remote machine.
+  const isRemote = pid.startsWith(REMOTE_PREFIX)
 
   // --------------------------------------------------
   // Refresh JVM and heap dump lists
@@ -39,13 +48,15 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [j, d] = await Promise.all([
+      const [j, d, r] = await Promise.all([
         axios.get('/api/jvms'),
         axios.get('/api/heapdumps'),
+        axios.get('/api/remote-jvms').catch(() => ({ data: [] })),
       ])
 
       setJvms(j.data)
       setDumps(d.data)
+      setRemoteJvms(r.data)
 
       setDumpId((current) => current || d.data[0]?.id || '')
       setApiError(null)
@@ -59,27 +70,29 @@ export default function App() {
   }, [refresh])
 
   // --------------------------------------------------
-  // Live JVM telemetry
+  // Live JVM telemetry, memory pools and GC events
   // --------------------------------------------------
 
-  const { status, startTelemetry, stopTelemetry } = heap
+  const { status, startTelemetry, stopTelemetry, startGcEvents, stopGcEvents } = heap
 
   useEffect(() => {
     if (status !== 'open') return
 
     if (pid) {
       startTelemetry(pid)
+      startGcEvents(pid)
     } else {
       stopTelemetry()
+      stopGcEvents()
     }
-  }, [pid, status, startTelemetry, stopTelemetry])
+  }, [pid, status, startTelemetry, stopTelemetry, startGcEvents, stopGcEvents])
 
   // --------------------------------------------------
   // Manual heap dump
   // --------------------------------------------------
 
   async function takeDump() {
-    if (!pid || busy) return
+    if (!pid || busy || isRemote) return
 
     setBusy(true)
     setApiError(null)
@@ -140,7 +153,7 @@ export default function App() {
   // --------------------------------------------------
 
   async function startWatch() {
-    if (!pid || watch) return
+    if (!pid || watch || isRemote) return
 
     setApiError(null)
     lastRefreshedDumpId.current = ''
@@ -209,11 +222,6 @@ export default function App() {
             setSelected(null)
           }
         }
-
-        // The backend removes a failed watch and reports ERROR.
-        if (updatedWatch.state === 'ERROR') {
-          setWatch(updatedWatch)
-        }
       } catch {
         // A temporary polling failure is retried on the next interval.
       }
@@ -235,21 +243,18 @@ export default function App() {
     heap.expand(dumpId, node.id, 2, 400)
   }
 
-  // --------------------------------------------------
-  // Telemetry calculations
-  // --------------------------------------------------
+  // The static reference nearest to the leaked object is the real holder.
+  // Example: class LeakyApp through static SESSIONS (not the JDK launcher further up the path).
+  const holderPath = suspect?.pathToGcRoot?.path ?? []
+  let holderIndex = holderPath.length - 1
+  while (
+      holderIndex > 0 &&
+      !String(holderPath[holderIndex].referenceFromPrevious || '').startsWith('static ')
+      ) {
+    holderIndex--
+  }
 
-  const memory = heap.telemetry?.memory
-
-  const heapPercent =
-      usagePercent(memory?.heapUsed, memory?.heapMax) ?? 0
-
-  const watchColor =
-      watch?.state === 'SUSPECTED'
-          ? '#f87171'
-          : watch?.state === 'ERROR'
-              ? '#fbbf24'
-              : '#e2e8f0'
+  const selectedClass = selected ? splitClassName(selected.label) : null
 
   // --------------------------------------------------
   // UI
@@ -263,350 +268,305 @@ export default function App() {
   }
 
   return (
-      <div style={{ position: 'fixed', inset: 0 }}>
-        <GraphScene
-            nodes={view.nodes}
-            edges={view.edges}
-            version={view.version}
-            rootId={view.rootId}
-            layout={layout}
-            instanced={Boolean(stress)}
-            selectedId={selected?.id}
-            onSelect={setSelected}
-            onExpand={expand}
-        />
-
-        {/* Top-left controls */}
-        <div style={{ ...panel, top: 12, left: 12, width: 300 }}>
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>
-            HeapVortex ({heap.status})
+      <div style={{ position: 'fixed', inset: 0, display: 'flex' }}>
+        {/* 3D view with its floating panels */}
+        <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+          <div style={{ position: 'absolute', inset: 0 }}>
+            <GraphScene
+                nodes={view.nodes}
+                edges={view.edges}
+                version={view.version}
+                rootId={view.rootId}
+                layout={layout}
+                instanced={Boolean(stress)}
+                selectedId={selected?.id}
+                onSelect={setSelected}
+                onExpand={expand}
+            />
           </div>
 
-          {/* JVM selection and manual heap dump */}
-          <div style={{ marginBottom: 6 }}>
-            <select
-                value={pid}
-                onChange={(e) => {
-                  setPid(e.target.value)
-                  setWatch(null)
-                  lastRefreshedDumpId.current = ''
-                }}
-                style={{ width: '100%' }}
-            >
-              <option value="">Choose a JVM</option>
-
-              {jvms.map((j) => (
-                  <option key={j.pid} value={j.pid}>
-                    {j.pid} {String(j.displayName || '').slice(0, 40)}
-                  </option>
-              ))}
-            </select>
-
-            <button
-                disabled={!pid || busy}
-                onClick={takeDump}
-                style={{ marginTop: 4 }}
-            >
-              {busy ? 'Processing...' : 'Take heap dump'}
-            </button>
-
-            <button
-                disabled={!pid}
-                onClick={watch ? stopWatch : startWatch}
-                style={{ marginTop: 4, marginLeft: 4 }}
-            >
-              {watch ? 'Stop leak watch' : 'Start leak watch'}
-            </button>
-
-            <button
-                onClick={refresh}
-                style={{ marginTop: 4, marginLeft: 4 }}
-            >
-              Refresh lists
-            </button>
-          </div>
-
-          {/* Heap dump selection */}
-          <div style={{ marginBottom: 6 }}>
-            <select
-                value={dumpId}
-                onChange={(e) => setDumpId(e.target.value)}
-                style={{ width: '100%' }}
-            >
-              <option value="">Choose a dump</option>
-
-              {dumps.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.id}
-                  </option>
-              ))}
-            </select>
-
-            <button
-                disabled={!dumpId || heap.loading}
-                onClick={() => { setStress(null); heap.overview(dumpId) }}
-                style={{ marginTop: 4 }}
-            >
-              Load overview
-            </button>{' '}
-
-            <button
-                disabled={!dumpId || busy}
-                onClick={findSuspect}
-                style={{ marginTop: 4 }}
-            >
-              Find leak suspect
-            </button>
-          </div>
-
-          {/* Synthetic graph stress tests */}
-          <div style={{ marginBottom: 6 }}>
-            Stress test:{' '}
-            {[10000, 20000].map((n) => (
-                <button
-                    key={n}
-                    onClick={() =>
-                        setStress({ ...generateGraph(n), version: Date.now() })
-                    }
-                >
-                  {n / 1000}k
-                </button>
-            ))}{' '}
-            {stress && (
-                <button onClick={() => setStress(null)}>Exit</button>
-            )}
-          </div>
-
-          {/* Layout toggle */}
-          <div style={{ marginBottom: 6 }}>
-            Layout:{' '}
-            <button
-                onClick={() =>
-                    setLayout((current) =>
-                        current === 'solar' ? 'force' : 'solar',
-                    )
-                }
-            >
-              {layout === 'solar' ? 'Solar system' : 'Force graph'} (switch)
-            </button>
-          </div>
-
-          {/* Rendered graph size, used as evidence for the rendering check */}
-          <div style={{ marginBottom: 6 }}>
-            Nodes {view.nodes.size} / Edges {view.edges.size}
-          </div>
-
-          {heap.loading && <div>Loading graph...</div>}
-
-          {heap.truncated && (
-              <div style={{ color: '#fbbf24' }}>
-                Graph was capped. Expand a single node to look deeper.
-              </div>
-          )}
-
-          {(heap.error || apiError) && (
-              <div style={{ color: '#f87171', overflowWrap: 'anywhere' }}>
-                {heap.error || apiError}
-              </div>
-          )}
-
-          <div style={{ opacity: 0.7, marginTop: 6 }}>
-            Click a sphere to select it, double-click to expand it.
-          </div>
-        </div>
-
-        {/* Live JVM telemetry */}
-        {heap.telemetry && (
-            <div style={{ ...panel, top: 12, right: 12, width: 240 }}>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                Live JVM {heap.telemetry.pid}
-              </div>
-
-              <div>
-                Heap {formatBytes(memory?.heapUsed)} /{' '}
-                {formatBytes(memory?.heapMax)}
-              </div>
-
-              <div
-                  style={{
-                    background: '#334155',
-                    height: 8,
-                    borderRadius: 4,
-                    marginTop: 4,
-                  }}
-              >
-                <div
-                    style={{
-                      width: `${Math.min(100, Math.max(0, heapPercent))}%`,
-                      height: 8,
-                      borderRadius: 4,
-                      background: heapPercent > 80 ? '#ef4444' : '#3b82f6',
-                    }}
-                />
-              </div>
-
-              <div style={{ marginTop: 6 }}>
-                Threads {heap.telemetry.threads?.threadCount ?? '-'}
-              </div>
-
-              {(heap.telemetry.gc || []).map((g) => (
-                  <div key={g.name}>
-                    {g.name}: {g.collectionCount} runs,{' '}
-                    {g.collectionTimeMs} ms
-                  </div>
-              ))}
+          {/* Top-left controls */}
+          <div style={{ ...panel, top: 12, left: 12, width: 300 }}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>
+              HeapVortex ({heap.status})
             </div>
-        )}
 
-        {/* Automatic leak-watch status */}
-        {watch && (
-            <div style={{ ...panel, top: 200, right: 12, width: 240 }}>
-              <div
-                  style={{
-                    fontWeight: 600,
-                    color: watchColor,
-                    marginBottom: 6,
+            {/* JVM selection and manual heap dump */}
+            <div style={{ marginBottom: 6 }}>
+              <select
+                  value={pid}
+                  onChange={(e) => {
+                    setPid(e.target.value)
+                    setWatch(null)
+                    lastRefreshedDumpId.current = ''
                   }}
+                  style={{ width: '100%' }}
               >
-                Leak watch: {watch.state}
-              </div>
+                <option value="">Choose a JVM</option>
 
-              <div>{watch.message}</div>
+                <optgroup label="Local JVMs">
+                  {jvms.map((j) => (
+                      <option key={j.pid} value={j.pid}>
+                        {j.pid} {String(j.displayName || '').slice(0, 40)}
+                      </option>
+                  ))}
+                </optgroup>
 
-              <div style={{ marginTop: 6 }}>
-                Floor samples: {watch.floorSamples}
-              </div>
+                {remoteJvms.length > 0 && (
+                    <optgroup label="Secure remote JMX (TLS)">
+                      {remoteJvms.map((j) => (
+                          <option key={j.pid} value={j.pid}>
+                            {j.displayName}
+                          </option>
+                      ))}
+                    </optgroup>
+                )}
+              </select>
 
-              <div>
-                Heap used: {formatBytes(watch.heapUsed)}
-              </div>
+              <button
+                  disabled={!pid || busy || isRemote}
+                  onClick={takeDump}
+                  style={{ marginTop: 4 }}
+              >
+                {busy ? 'Processing...' : 'Take heap dump'}
+              </button>
 
-              <div>
-                Floor growth: {Number(watch.growthPercent ?? 0).toFixed(2)}%
-              </div>
+              <button
+                  disabled={!pid || isRemote}
+                  onClick={watch ? stopWatch : startWatch}
+                  style={{ marginTop: 4, marginLeft: 4 }}
+              >
+                {watch ? 'Stop leak watch' : 'Start leak watch'}
+              </button>
 
-              {watch.dumpId && (
-                  <div style={{ marginTop: 6, overflowWrap: 'anywhere' }}>
-                    Automatic dump: {watch.dumpId}
+              <button
+                  onClick={refresh}
+                  style={{ marginTop: 4, marginLeft: 4 }}
+              >
+                Refresh lists
+              </button>
+
+              {isRemote && (
+                  <div style={{ color: '#fbbf24', marginTop: 4 }}>
+                    Secure remote JVM: live metrics only, no heap dump or leak watch.
                   </div>
               )}
             </div>
-        )}
 
-        {/* Leak suspect details */}
-        {suspect && (
-            <div style={{ ...panel, bottom: 12, left: 12, width: 380 }}>
-              <div style={{ fontWeight: 600, color: '#f87171' }}>
-                Leak suspect: {suspect.likelyLeakClass}
-              </div>
+            {/* Heap dump selection */}
+            <div style={{ marginBottom: 6 }}>
+              <select
+                  value={dumpId}
+                  onChange={(e) => setDumpId(e.target.value)}
+                  style={{ width: '100%' }}
+              >
+                <option value="">Choose a dump</option>
 
-              <div>
-                {suspect.accumulationClassName} retains{' '}
-                {formatBytes(suspect.accumulationRetainedBytes)} (
-                {Number(suspect.heapPercent ?? 0).toFixed(1)}% of the heap
-                through {suspect.topClassName})
-              </div>
-
-              {(() => {
-                const path = suspect.pathToGcRoot?.path ?? []
-                let i = path.length - 1
-
-                while (
-                    i > 0 &&
-                    !String(path[i].referenceFromPrevious || '').startsWith('static ')
-                    ) {
-                  i--
-                }
-
-                return i > 0 ? (
-                    <div>
-                      Held by {path[i - 1].typeName} through{' '}
-                      {path[i].referenceFromPrevious}
-                    </div>
-                ) : null
-              })()}
+                {dumps.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.id}
+                    </option>
+                ))}
+              </select>
 
               <button
-                  style={{ marginTop: 6 }}
+                  disabled={!dumpId || heap.loading}
+                  onClick={() => { setStress(null); heap.overview(dumpId) }}
+                  style={{ marginTop: 4 }}
+              >
+                Load overview
+              </button>{' '}
+
+              <button
+                  disabled={!dumpId || busy}
+                  onClick={findSuspect}
+                  style={{ marginTop: 4 }}
+              >
+                Find leak suspect
+              </button>
+            </div>
+
+            {/* Synthetic graph stress tests */}
+            <div style={{ marginBottom: 6 }}>
+              Stress test:{' '}
+              {[10000, 20000].map((n) => (
+                  <button
+                      key={n}
+                      onClick={() =>
+                          setStress({ ...generateGraph(n), version: Date.now() })
+                      }
+                  >
+                    {n / 1000}k
+                  </button>
+              ))}{' '}
+              {stress && (
+                  <button onClick={() => setStress(null)}>Exit</button>
+              )}
+            </div>
+
+            {/* Layout toggle and sidebar toggle */}
+            <div style={{ marginBottom: 6 }}>
+              Layout:{' '}
+              <button
                   onClick={() =>
-                      heap.expand(
-                          dumpId,
-                          suspect.accumulationObjectId,
-                          2,
-                          400,
+                      setLayout((current) =>
+                          current === 'solar' ? 'force' : 'solar',
                       )
                   }
               >
-                Show it in 3D
+                {layout === 'solar' ? 'Solar system' : 'Force graph'} (switch)
+              </button>{' '}
+              <button onClick={() => setSidebarOpen((open) => !open)}>
+                {sidebarOpen ? 'Hide metrics' : 'Show metrics'}
               </button>
+            </div>
 
-              <button
-                  style={{ marginTop: 6, marginLeft: 4 }}
-                  onClick={() => {
-                    setStress(null)
-                    heap.expand(
-                        dumpId,
-                        suspect.accumulationObjectId,
-                        6,
-                        10000,
-                    )
+            {/* Rendered graph size, used as evidence for the rendering check */}
+            <div style={{ marginBottom: 6 }}>
+              Nodes {view.nodes.size} / Edges {view.edges.size}
+            </div>
+
+            {heap.loading && <div>Loading graph...</div>}
+
+            {heap.truncated && (
+                <div style={{ color: '#fbbf24' }}>
+                  Graph was capped. Expand a single node to look deeper.
+                </div>
+            )}
+
+            {(heap.error || apiError) && (
+                <div style={{ color: '#f87171', overflowWrap: 'anywhere' }}>
+                  {heap.error || apiError}
+                </div>
+            )}
+
+            <div style={{ opacity: 0.7, marginTop: 6 }}>
+              Hover a sphere for its class and memory, click to select it,
+              double-click to expand it.
+            </div>
+          </div>
+
+          {/* Leak suspect details */}
+          {suspect && (
+              <div style={{ ...panel, bottom: 12, left: 12, width: 380 }}>
+                <div style={{ fontWeight: 600, color: '#f87171' }}>
+                  Leak suspect: {suspect.likelyLeakClass}
+                </div>
+
+                <div>
+                  {suspect.accumulationClassName} retains{' '}
+                  {formatBytes(suspect.accumulationRetainedBytes)} (
+                  {Number(suspect.heapPercent ?? 0).toFixed(1)}% of the heap
+                  through {suspect.topClassName})
+                </div>
+
+                {holderIndex > 0 && (
+                    <div>
+                      Held by {holderPath[holderIndex - 1].typeName} through{' '}
+                      {holderPath[holderIndex].referenceFromPrevious}
+                    </div>
+                )}
+
+                <button
+                    style={{ marginTop: 6 }}
+                    onClick={() =>
+                        heap.expand(
+                            dumpId,
+                            suspect.accumulationObjectId,
+                            2,
+                            400,
+                        )
+                    }
+                >
+                  Show it in 3D
+                </button>
+
+                <button
+                    style={{ marginTop: 6, marginLeft: 4 }}
+                    onClick={() => {
+                      setStress(null)
+                      heap.expand(
+                          dumpId,
+                          suspect.accumulationObjectId,
+                          6,
+                          10000,
+                      )
+                    }}
+                >
+                  Load up to 10,000 real nodes
+                </button>
+              </div>
+          )}
+
+          {/* Selected object details */}
+          {selected && (
+              <div
+                  style={{
+                    ...panel,
+                    bottom: 12,
+                    right: 12,
+                    width: 320,
+                    overflowWrap: 'anywhere',
                   }}
               >
-                Load up to 10,000 real nodes
-              </button>
-            </div>
-        )}
+                <div style={{ fontWeight: 600, wordBreak: 'break-all' }}>
+                  {selectedClass.name}
+                </div>
 
-        {/* Selected object details */}
-        {selected && (
-            <div
-                style={{
-                  ...panel,
-                  bottom: 12,
-                  right: 12,
-                  width: 320,
-                  overflowWrap: 'anywhere',
-                }}
-            >
-              <div style={{ fontWeight: 600, wordBreak: 'break-all' }}>
-                {selected.label}
+                {selectedClass.pkg && (
+                    <div style={{ opacity: 0.7 }}>{selectedClass.pkg}</div>
+                )}
+
+                <div>Kind: {selected.kind}</div>
+                <div>Object ID: {selected.id}</div>
+                <div>Shallow: {formatBytes(selected.shallowBytes)}</div>
+
+                <div>
+                  Retained: {formatBytes(selected.retainedBytes)} (
+                  {Number(selected.retainedPercent ?? 0).toFixed(2)}%)
+                </div>
+
+                <button
+                    style={{ marginTop: 6 }}
+                    onClick={() => expand(selected)}
+                >
+                  Expand
+                </button>
               </div>
+          )}
 
-              <div>Kind: {selected.kind}</div>
-              <div>Object ID: {selected.id}</div>
-              <div>Shallow: {formatBytes(selected.shallowBytes)}</div>
-
-              <div>
-                Retained: {formatBytes(selected.retainedBytes)} (
-                {Number(selected.retainedPercent ?? 0).toFixed(2)}%)
-              </div>
-
-              <button
-                  style={{ marginTop: 6 }}
-                  onClick={() => expand(selected)}
-              >
-                Expand
-              </button>
-            </div>
-        )}
-
-        {/* Graph legend */}
-        <div
-            style={{
-              ...panel,
-              bottom: 12,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              padding: '6px 12px',
-              maxWidth: 'min(520px, 90vw)',
-              textAlign: 'center',
-              boxSizing: 'border-box',
-            }}
-        >
-          Sphere size = retained bytes. Colour: blue = small share of
-          the heap, red = large share. Centre = expanded object, outer
-          shells = further references.
+          {/* Graph legend */}
+          <div
+              style={{
+                ...panel,
+                bottom: 12,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                padding: '6px 12px',
+                maxWidth: 'min(520px, 90vw)',
+                textAlign: 'center',
+                boxSizing: 'border-box',
+              }}
+          >
+            Sphere size = retained bytes. Colour: blue = small share of
+            the heap, red = large share. Centre = expanded object, outer
+            shells = further references.
+          </div>
         </div>
+
+        {/* 2D metrics sidebar */}
+        {sidebarOpen && (
+            <MetricsSidebar
+                pid={pid}
+                telemetry={heap.telemetry}
+                cpu={heap.cpu}
+                heapHistory={heap.heapHistory}
+                cpuHistory={heap.cpuHistory}
+                pools={heap.pools}
+                gcEvents={heap.gcEvents}
+                watch={watch}
+            />
+        )}
       </div>
   )
 }
