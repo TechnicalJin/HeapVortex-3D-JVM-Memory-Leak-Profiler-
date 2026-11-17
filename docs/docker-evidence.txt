@@ -1,0 +1,36 @@
+﻿Docker run - 2026-11-08 17:39:36
+NAME                    IMAGE                 COMMAND                  SERVICE    CREATED          STATUS          PORTS
+heapvortex-backend-1    heapvortex-backend    "/app/docker-entrypoΓÇª"   backend    21 seconds ago   Up 20 seconds   0.0.0.0:8080->8080/tcp, [::]:8080->8080/tcp
+heapvortex-frontend-1   heapvortex-frontend   "/docker-entrypoint.ΓÇª"   frontend   21 seconds ago   Up 20 seconds   0.0.0.0:3000->80/tcp, [::]:3000->80/tcp
+[{"pid":"7","displayName":"com.heapvortex.mock.LeakyApp"}]
+--- dumps inside the backend container ---
+total 8
+drwxr-xr-x 2 root root 4096 Nov  8 12:07 .
+drwxr-xr-x 1 root root 4096 Nov  8 12:10 ..
+--- backend log tail ---
+backend-1  | ( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+backend-1  |  \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+backend-1  |   '  |____| .__|_| |_|_| |_\__, | / / / /
+backend-1  |  =========|_|==============|___/=/_/_/_/
+backend-1  | 
+backend-1  |  :: Spring Boot ::                (v4.1.1)
+backend-1  | 
+backend-1  | 2026-11-08T12:09:17.107Z  INFO 1 --- [heapvortex-backend] [           main] com.heapvortex.BackendApplication        : Starting BackendApplication v0.0.1-SNAPSHOT using Java 21.0.13 with PID 1 (/app/app.jar started by root in /app)
+backend-1  | 2026-11-08T12:09:17.111Z  INFO 1 --- [heapvortex-backend] [           main] com.heapvortex.BackendApplication        : No active profile set, falling back to 1 default profile: "default"
+backend-1  | 2026-11-08T12:09:18.291Z  INFO 1 --- [heapvortex-backend] [           main] o.s.boot.tomcat.TomcatWebServer          : Tomcat initialized with port 8080 (http)
+backend-1  | 2026-11-08T12:09:18.303Z  INFO 1 --- [heapvortex-backend] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+backend-1  | 2026-11-08T12:09:18.303Z  INFO 1 --- [heapvortex-backend] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/11.0.24]
+backend-1  | 2026-11-08T12:09:18.325Z  INFO 1 --- [heapvortex-backend] [           main] b.w.c.s.WebApplicationContextInitializer : Root WebApplicationContext: initialization completed in 1140 ms
+backend-1  | 2026-11-08T12:09:18.452Z  INFO 1 --- [heapvortex-backend] [           main] com.heapvortex.jvm.JmxTlsConfig          : JMX TLS: no trust store configured, the JVM default trust applies
+backend-1  | 2026-11-08T12:09:18.939Z  INFO 1 --- [heapvortex-backend] [           main] o.s.boot.tomcat.TomcatWebServer          : Tomcat started on port 8080 (http) with context path '/'
+backend-1  | 2026-11-08T12:09:18.953Z  INFO 1 --- [heapvortex-backend] [           main] com.heapvortex.BackendApplication        : Started BackendApplication in 2.303 seconds (process running for 2.953)
+backend-1  | 2026-11-08T12:09:36.931Z  INFO 1 --- [heapvortex-backend] [nio-8080-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+backend-1  | 2026-11-08T12:09:36.931Z  INFO 1 --- [heapvortex-backend] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+backend-1  | 2026-11-08T12:09:36.932Z  INFO 1 --- [heapvortex-backend] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 1 ms
+backend-1  | 2026-11-08T12:10:05.503Z  INFO 1 --- [heapvortex-backend] [pool-3-thread-1] c.heapvortex.jvm.JmxConnectionManager    : Connecting to JVM 7 at service:jmx:rmi://127.0.0.1/stub/rO0ABXNyAC5qYXZheC5tYW5hZ2VtZW50LnJlbW90ZS5ybWkuUk1JU2VydmVySW1wbF9TdHViAAAAAAAAAAICAAB4cgAaamF2YS5ybWkuc2VydmVyLlJlbW90ZVN0dWLp/tzJi+FlGgIAAHhyABxqYXZhLnJtaS5zZXJ2ZXIuUmVtb3RlT2JqZWN002G0kQxhMx4DAAB4cHc1AAtVbmljYXN0UmVmMgAACjE3Mi4yMC4wLjIAAKALHrmrQ5WKsVT8MkHbAAABobsQ1vqAAQB4
+--- dumps inside the backend container (after the fix) ---
+total 282584
+drwxr-xr-x 2 root root      4096 Nov  8 12:19 .
+drwxr-xr-x 1 root root      4096 Nov  8 12:10 ..
+-rw------- 1 root root 144569875 Nov  8 12:18 heap-7-20261108-121810.hprof
+-rw------- 1 root root 144782298 Nov  8 12:19 heap-7-20261108-121908.hprof
